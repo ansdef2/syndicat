@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Синдикат - открытая панель</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;800&family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --tush:#14100C;
+  --tush-2:#1E1812;
+  --kumach:#8E1B14;
+  --kumach-deep:#5C0E08;
+  --latun:#C9A15B;
+  --luch:#F5D98A;
+  --grunt:#E3D6B4;
+  --grunt-2:#CDBD95;
+  --patina:#3A4A42;
+  --hair:rgba(201,161,91,.28);
+  --unit:8px;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--tush);
+  color:var(--grunt);
+  font-family:"Golos Text","Helvetica Neue",Arial,sans-serif;
+  font-size:16px;
+  line-height:1.55;
+  font-feature-settings:"tnum" 1;
+}
+h1,h2,h3,.display{font-family:"Unbounded","Arial Black",Impact,sans-serif;font-weight:800;letter-spacing:-.02em;margin:0}
+
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+.num{font-feature-settings:"tnum" 1;font-variant-numeric:tabular-nums}
+
+/* ---------- шапка с клиновой плашкой ---------- */
+.top{position:relative;overflow:hidden;border-bottom:1px solid var(--hair)}
+.top .wedge{
+  position:absolute;inset:0;
+  background:linear-gradient(100deg,var(--kumach) 0 62%,var(--kumach-deep) 100%);
+  clip-path:polygon(0 0,34% 0,25% 100%,0 100%);
+}
+.top .hairline{
+  position:absolute;left:0;right:0;top:0;bottom:0;
+  background:linear-gradient(100deg,transparent 0 35.5%,var(--latun) 35.5% 36.2%,transparent 36.2%);
+  opacity:.55;
+}
+.top .bar{position:relative;display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;padding-block:26px}
+.mark{font-family:"Unbounded","Arial Black",sans-serif;font-weight:800;font-size:22px;letter-spacing:.06em;color:var(--luch)}
+.mark span{color:#F3E6C6}
+.top .meta{font-size:13px;color:var(--grunt-2);margin-left:auto}
+
+/* ---------- герой ---------- */
+.hero{position:relative;padding-block:44px 40px}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center}
+.rate-label{font-size:14px;color:var(--latun);margin:0 0 6px}
+.rate{font-family:"Unbounded",sans-serif;font-weight:800;font-size:66px;line-height:.95;color:var(--luch)}
+.rate small{font-size:22px;color:var(--grunt-2);font-weight:400;letter-spacing:0}
+.rate-sub{margin:14px 0 0;max-width:46ch;color:var(--grunt-2);font-size:15px}
+
+.stats{display:flex;gap:0;margin-top:28px;border-top:1px solid var(--hair)}
+.stat{padding:14px 18px 0 0;margin-right:18px;border-right:1px solid var(--hair)}
+.stat:last-child{border-right:0}
+.stat b{display:block;font-family:"Unbounded",sans-serif;font-size:22px;color:var(--grunt)}
+.stat i{display:block;font-style:normal;font-size:12.5px;color:var(--latun);margin-top:2px}
+.stat.up b{color:var(--luch)}
+
+/* ---------- розетка ---------- */
+.rosette{position:relative;max-width:412px;margin:0 0 0 auto;width:100%}
+.rosette svg{width:100%;height:auto;display:block;overflow:visible}
+.ray{transform-origin:center;cursor:pointer}
+.ray line{stroke-linecap:butt;transition:stroke-width .18s ease}
+.ray:hover line,.ray:focus-visible line{stroke-width:13}
+.ray:focus-visible{outline:2px solid var(--luch);outline-offset:4px}
+.readout{
+  margin-top:10px;min-height:52px;border-top:1px solid var(--hair);padding-top:10px;
+  font-size:14px;color:var(--grunt-2)
+}
+.readout b{color:var(--grunt);font-weight:600}
+.readout .k{font-family:"Unbounded",sans-serif;color:var(--luch);font-size:18px;margin-left:8px}
+
+/* ---------- секции ---------- */
+.sec{padding-block:52px;border-top:1px solid var(--hair)}
+.sec-head{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:8px}
+.sec h2{font-size:28px;color:var(--grunt)}
+.sec .note{font-size:14px;color:var(--grunt-2);max-width:62ch;margin:6px 0 26px}
+.tag{
+  font-family:"Unbounded",sans-serif;font-size:11px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--luch);background:var(--kumach);
+  padding:5px 12px;transform:skewX(-12deg);display:inline-block
+}
+.tag em{display:inline-block;transform:skewX(12deg);font-style:normal}
+
+/* ---------- панель субститутов ---------- */
+.panelcard{background:var(--grunt);color:var(--tush);padding:26px 28px}
+.panelcard h3{font-size:19px;margin-bottom:2px}
+.panelcard .cap{font-size:13px;color:#5b5140;margin:4px 0 22px}
+.scalerow{display:grid;grid-template-columns:210px 1fr 96px;gap:14px;align-items:end}
+.scale{position:relative;height:18px;border-bottom:1px solid rgba(20,16,12,.25)}
+.scale span{position:absolute;top:0;font-size:11.5px;color:#6a5f4b;transform:translateX(-50%);white-space:nowrap}
+.row{display:grid;grid-template-columns:210px 1fr 96px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(20,16,12,.12)}
+.row:last-child{border-bottom:0}
+.rname{font-size:14px;font-weight:500}
+.rname i{display:block;font-style:normal;font-size:11.5px;color:#6a5f4b;font-weight:400}
+.track{position:relative;height:22px}
+.band{position:absolute;top:6px;height:10px;background:var(--grunt-2);border:1px solid rgba(20,16,12,.3)}
+.box{position:absolute;top:2px;height:18px;background:var(--kumach);opacity:.85}
+.med{position:absolute;top:-1px;width:2px;height:24px;background:var(--tush)}
+.rval{text-align:right;font-size:14px;font-weight:600}
+.rval i{display:block;font-style:normal;font-size:11.5px;color:#6a5f4b;font-weight:400}
+
+/* ---------- экстерналии + пикетти ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+.block{border:1px solid var(--hair);padding:24px}
+.block h3{font-size:18px;color:var(--grunt);margin-bottom:4px}
+.block .cap{font-size:13px;color:var(--grunt-2);margin:4px 0 20px}
+
+.ext{display:grid;grid-template-columns:150px 1fr 62px;gap:12px;align-items:center;padding:7px 0}
+.ext span{font-size:13.5px}
+.ebar{height:14px;background:linear-gradient(90deg,var(--kumach),var(--latun))}
+.ext b{text-align:right;font-size:14px;color:var(--luch);font-weight:600}
+
+.split{display:grid;grid-template-columns:34px 1fr 1fr 92px;gap:8px;align-items:center;padding:6px 0;font-size:13px}
+.split .code{font-family:"Unbounded",sans-serif;font-size:12px;color:var(--latun)}
+.sl,.sc{height:15px;position:relative}
+.sl div{position:absolute;right:0;top:0;height:100%;background:var(--latun)}
+.sc div{position:absolute;left:0;top:0;height:100%;background:var(--kumach)}
+.split .v{text-align:right;color:var(--grunt-2);font-size:12.5px}
+.legend{display:flex;gap:18px;font-size:12.5px;color:var(--grunt-2);margin-top:16px;padding-top:12px;border-top:1px solid var(--hair)}
+.legend i{display:inline-block;width:14px;height:9px;margin-right:6px;vertical-align:middle;font-style:normal}
+
+/* ---------- подвал ---------- */
+.foot{border-top:1px solid var(--hair);padding-block:30px 54px;font-size:13px;color:var(--grunt-2)}
+.foot p{max-width:76ch;margin:0 0 8px}
+
+@media (max-width:900px){
+  .hero-grid,.two{grid-template-columns:1fr}
+  .top .wedge{clip-path:polygon(0 0,70% 0,60% 54%,0 54%)}
+  .top .hairline{background:linear-gradient(100deg,transparent 0 72%,var(--latun) 72% 73.4%,transparent 73.4%)}
+  .top .bar{padding-block:20px 16px}
+  .top .meta{margin-left:0;margin-top:10px;flex-basis:100%}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+  .stat{border-right:0;border-bottom:1px solid var(--hair);margin-right:0;padding:12px 0}
+  .rosette{margin:28px auto 0}
+  .rate{font-size:46px}
+  .row,.scalerow{grid-template-columns:120px 1fr 78px;gap:10px}
+  .stats{flex-wrap:wrap}
+}
+@media (prefers-reduced-motion:reduce){
+  .ray line{transition:none}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wedge" aria-hidden="true"></div>
+  <div class="hairline" aria-hidden="true"></div>
+  <div class="wrap bar">
+    <div class="mark">СИНДИ<span>КАТ</span></div>
+    <div class="meta num">периметр ОКВЭД 20-30 &nbsp;·&nbsp; данные на 11.09.2026 &nbsp;·&nbsp; обновление T+1</div>
+  </div>
+</header>
+
+<main>
+<section class="hero wrap">
+  <div class="hero-grid">
+    <div>
+      <p class="rate-label">Курс токена человеко-часа</p>
+      <div class="rate num">876,58 <small>руб. / ТЧЧ</small></div>
+      <p class="rate-sub">Один человеко-час первого разряда при среднем по сети отраслевом коэффициенте. Из них 622 руб. - оплата труда с начислениями, 255 руб. - социализированная доля прибавочного продукта.</p>
+      <div class="stats">
+        <div class="stat up"><b class="num">1,008</b><i>индекс токен-цен, коридор ±2%</i></div>
+        <div class="stat"><b class="num">0,35</b><i>норма социализации φ</i></div>
+        <div class="stat"><b class="num">+0,7%</b><i>шаг базы за месяц</i></div>
+        <div class="stat"><b class="num">11</b><i>классов в периметре</i></div>
+      </div>
+    </div>
+
+    <div class="rosette">
+      <svg id="rose" viewBox="-168 -168 336 336" role="img" aria-label="Отраслевая розетка: коэффициент часа по классам ОКВЭД 20-30"></svg>
+      <div class="readout" id="readout" aria-live="polite">
+        Наведи или перейди табуляцией на луч, чтобы увидеть отрасль. Длина луча - коэффициент часа k<sub>j</sub>, кольцо - единица.
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec wrap">
+  <div class="sec-head">
+    <span class="tag"><em>канал 22.21.21</em></span>
+    <h2>Трубы напорные Dy 100-110</h2>
+  </div>
+  <p class="note">Квантили по состоявшимся сделкам сети за последние 30 суток. В окне 14 независимых продавцов, публикация разрешена. Альтернативы лежат в трёх классах ОКВЭД: снабженцу нужна функция, а не классификация производителя.</p>
+
+  <div class="panelcard">
+    <h3>Распределение цен и замещаемость</h3>
+    <p class="cap">Полоса - интервал P10-P90, плотный блок - P25-P75, риска - медиана. Руб. за метр.</p>
+    <div class="scalerow"><div></div><div class="scale" id="scale"></div><div></div></div>
+    <div id="pipes"></div>
+  </div>
+</section>
+
+<section class="sec wrap">
+  <div class="two">
+    <div class="block">
+      <h3>Вклад экстерналий в цену</h3>
+      <p class="cap">Сценарий: энергия +12%, курс +8%. Разложение Δ ln P по эластичностям, оценённым на сделках сети.</p>
+      <div id="ext"></div>
+      <div class="legend"><span><i style="background:linear-gradient(90deg,var(--kumach),var(--latun))"></i>прирост цены за квартал</span></div>
+    </div>
+
+    <div class="block">
+      <h3>Труд и капитал в добавленной стоимости</h3>
+      <p class="cap">Слева - доля оплаты труда, справа - доля прибавочного продукта. Остаток до единицы - амортизация.</p>
+      <div id="split"></div>
+      <div class="legend">
+        <span><i style="background:var(--latun)"></i>труд</span>
+        <span><i style="background:var(--kumach)"></i>капитал</span>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot wrap">
+  <p>Публикуются только ретроспективные агрегаты по группам не менее чем из пяти независимых продавцов, с задержкой в одни сутки и без идентификаторов участников. Плановые и намеренные цены не публикуются.</p>
+  <p>Отраслевые значения в этой версии - демонстрационная калибровка. Якорь: среднемесячная начисленная зарплата по РФ 78 591,4 руб. (Росстат, январь-февраль 2026).</p>
+</footer>
+
+<script>
+const IND = [
+  {c:"20", n:"Химические вещества и продукты", s:"Химия",          k:1.153, b:1011, l:.46, cap:.42, sh:5.02},
+  {c:"21", n:"Лекарственные средства", s:"Фармацевтика",           k:1.340, b:1175, l:.43, cap:.47, sh:4.26},
+  {c:"22", n:"Резиновые и пластмассовые изделия", s:"Резина и пластмасса", k:0.720, b:631,  l:.62, cap:.28, sh:4.44},
+  {c:"23", n:"Прочая неметаллическая минеральная", s:"Стройматериалы", k:0.769, b:674,  l:.56, cap:.31, sh:5.05},
+  {c:"24", n:"Металлургическое производство", s:"Металлургия",      k:1.266, b:1109, l:.40, cap:.45, sh:5.22},
+  {c:"25", n:"Готовые металлические изделия", s:"Метизделия",       k:0.853, b:748,  l:.66, cap:.26, sh:2.77},
+  {c:"26", n:"Компьютеры, электроника, оптика", s:"Электроника",    k:1.323, b:1160, l:.55, cap:.35, sh:4.55},
+  {c:"27", n:"Электрическое оборудование", s:"Электрооборудование", k:0.904, b:792,  l:.63, cap:.29, sh:3.98},
+  {c:"28", n:"Машины и оборудование", s:"Машиностроение",           k:0.922, b:808,  l:.65, cap:.27, sh:3.62},
+  {c:"29", n:"Автотранспортные средства", s:"Автопром",             k:0.813, b:713,  l:.67, cap:.22, sh:3.54},
+  {c:"30", n:"Прочие транспортные средства", s:"Прочий транспорт",  k:1.202, b:1054, l:.60, cap:.30, sh:2.95}
+];
+
+/* ---------- отраслевая розетка ---------- */
+const NS = "http://www.w3.org/2000/svg";
+const rose = document.getElementById("rose");
+const readout = document.getElementById("readout");
+const R0 = 34, UNIT = 74;          // радиус ядра, радиус единичного кольца
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function el(tag, attrs){
+  const e = document.createElementNS(NS, tag);
+  for (const a in attrs) e.setAttribute(a, attrs[a]);
+  return e;
+}
+
+// кольцо единицы
+rose.appendChild(el("circle",{cx:0,cy:0,r:R0+UNIT,fill:"none",stroke:"var(--hair)","stroke-width":1,"stroke-dasharray":"3 4"}));
+
+IND.forEach((d,i)=>{
+  const ang = (i/IND.length)*2*Math.PI - Math.PI/2;
+  const len = R0 + UNIT*d.k;
+  const g = el("g",{class:"ray",tabindex:"0",role:"button","aria-label":d.n+", коэффициент "+d.k.toFixed(3)});
+  const line = el("line",{
+    x1:Math.cos(ang)*R0, y1:Math.sin(ang)*R0,
+    x2:Math.cos(ang)*len, y2:Math.sin(ang)*len,
+    stroke: d.k>=1 ? "var(--luch)" : "var(--kumach)",
+    "stroke-width": d.k>=1 ? 9 : 7,
+    opacity: d.k>=1 ? .95 : .8
+  });
+  const dot = el("circle",{cx:Math.cos(ang)*(len+9),cy:Math.sin(ang)*(len+9),r:2.6,fill:"var(--latun)"});
+  const lab = el("text",{
+    x:Math.cos(ang)*(len+26), y:Math.sin(ang)*(len+26)+4,
+    fill:"var(--latun)","font-size":"11.5","text-anchor":"middle",
+    "font-family":"Unbounded, sans-serif","font-weight":"700"
+  });
+  lab.textContent = d.c;
+  g.append(line,dot,lab);
+
+  if(!reduce){
+    const total = Math.hypot(line.getAttribute("x2")-line.getAttribute("x1"), line.getAttribute("y2")-line.getAttribute("y1"));
+    line.style.strokeDasharray = total;
+    line.style.strokeDashoffset = total;
+    line.style.transition = "stroke-dashoffset .55s cubic-bezier(.2,.8,.2,1) "+(i*40)+"ms, stroke-width .18s ease";
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{ line.style.strokeDashoffset = 0; }));
+    [dot,lab].forEach(n=>{
+      n.style.opacity = 0;
+      n.style.transition = "opacity .3s ease "+(i*40+380)+"ms";
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{ n.style.opacity = 1; }));
+    });
+  }
+
+  const show = ()=>{
+    readout.innerHTML = "<b>"+d.c+" · "+d.n+"</b><span class='k num'>k = "+
+      d.k.toFixed(3).replace(".",",")+"</span><br>база часа "+
+      d.b.toLocaleString("ru-RU")+" руб. · доля труда в ВДС "+Math.round(d.l*100)+"%";
+  };
+  g.addEventListener("mouseenter",show);
+  g.addEventListener("focus",show);
+  rose.appendChild(g);
+});
+
+// ядро: шестерня
+const core = el("g",{"aria-hidden":"true"});
+for(let i=0;i<12;i++){
+  const a=(i/12)*2*Math.PI;
+  core.appendChild(el("rect",{
+    x:-3.2,y:-R0-4,width:6.4,height:9,fill:"var(--kumach)",
+    transform:"rotate("+(a*180/Math.PI)+")"
+  }));
+}
+core.appendChild(el("circle",{cx:0,cy:0,r:R0-2,fill:"none",stroke:"var(--kumach)","stroke-width":7}));
+core.appendChild(el("circle",{cx:0,cy:0,r:12,fill:"var(--tush)",stroke:"var(--kumach-deep)","stroke-width":3}));
+rose.appendChild(core);
+
+/* ---------- канал субститутов ---------- */
+const PIPES = [
+  {n:"Труба ПЭ100 SDR17 d110", o:"ОКВЭД 22.21 · полиэтилен", p10:366, p25:389, med:412, p75:441, p90:478, s:1.00, loc:.94},
+  {n:"Труба ПП-R PN10 d110",   o:"ОКВЭД 22.21 · полипропилен", p10:421, p25:443, med:468, p75:498, p90:535, s:0.87, loc:.91},
+  {n:"Труба ВГП оцинк. Dy100", o:"ОКВЭД 25.21 · сталь",     p10:612, p25:648, med:690, p75:748, p90:812, s:0.61, loc:.97},
+  {n:"Труба ВЧШГ Dy100",       o:"ОКВЭД 24.51 · чугун",     p10:1020,p25:1075,med:1140,p75:1235,p90:1340, s:0.44, loc:.99}
+];
+const LO=300, HI=1400, span=HI-LO;
+const pos = v => ((v-LO)/span)*100;
+
+const scale = document.getElementById("scale");
+[400,600,800,1000,1200,1400].forEach(v=>{
+  const s=document.createElement("span");
+  s.className="num"; s.textContent=v; s.style.left=pos(v)+"%";
+  scale.appendChild(s);
+});
+
+document.getElementById("pipes").innerHTML = PIPES.map(d=>`
+  <div class="row">
+    <div class="rname">${d.n}<i>${d.o}</i></div>
+    <div class="track">
+      <div class="band" style="left:${pos(d.p10)}%;width:${pos(d.p90)-pos(d.p10)}%"></div>
+      <div class="box"  style="left:${pos(d.p25)}%;width:${pos(d.p75)-pos(d.p25)}%"></div>
+      <div class="med"  style="left:${pos(d.med)}%"></div>
+    </div>
+    <div class="rval num">${d.med.toLocaleString("ru-RU")}<i>Σ ${d.s.toFixed(2).replace(".",",")} · лок. ${d.loc.toFixed(2).replace(".",",")}</i></div>
+  </div>`).join("");
+
+/* ---------- экстерналии ---------- */
+const maxSh = Math.max(...IND.map(d=>d.sh));
+document.getElementById("ext").innerHTML = IND
+  .slice().sort((a,b)=>b.sh-a.sh)
+  .map(d=>`<div class="ext">
+      <span>${d.c} &nbsp;${d.s}</span>
+      <div class="ebar" style="width:${(d.sh/maxSh*100).toFixed(1)}%"></div>
+      <b class="num">+${d.sh.toFixed(2).replace(".",",")}%</b>
+    </div>`).join("");
+
+/* ---------- труд и капитал ---------- */
+document.getElementById("split").innerHTML = IND.map(d=>`
+  <div class="split">
+    <span class="code">${d.c}</span>
+    <div class="sl"><div style="width:${d.l*100}%"></div></div>
+    <div class="sc"><div style="width:${d.cap*100}%"></div></div>
+    <span class="v num">${Math.round(d.l*100)} / ${Math.round(d.cap*100)}</span>
+  </div>`).join("");
+</script>
+</body>
+</html>
