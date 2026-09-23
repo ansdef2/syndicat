@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """Локальный HTTP-сервер платформы. Только стандартная библиотека."""
 
+import datetime
 import json
 import mimetypes
 import os
 import posixpath
 import socket
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -15,15 +17,35 @@ WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DATA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 
-def say(text: str = "") -> None:
-    """Печать, безопасная при запуске без консоли.
+_LOG_FILE = None
 
-    Под pythonw.exe в Windows sys.stdout равен None, и обычный print
-    уронил бы сервер на первой же строке приветствия.
+
+def open_log(path: str) -> None:
+    """Журнал в файл - единственный способ что-то узнать при фоновом запуске.
+
+    Под pythonw.exe в Windows консоли нет вовсе: sys.stdout равен None,
+    и перенаправление оболочки до процесса не доходит. Поэтому сервер
+    пишет журнал сам, в UTF-8, с отметками времени.
     """
+    global _LOG_FILE
+    try:
+        _LOG_FILE = open(path, "a", encoding="utf-8", buffering=1)
+    except OSError as exc:
+        _LOG_FILE = None
+        say(f"  журнал {path} недоступен: {exc}")
+
+
+def say(text: str = "") -> None:
+    """Вывод, безопасный при запуске без консоли и при любой кодовой странице."""
+    stamped = f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}  {text}" if text else ""
+    if _LOG_FILE is not None:
+        try:
+            _LOG_FILE.write(stamped + "\n")
+        except (ValueError, OSError):
+            pass
     try:
         print(text, flush=True)
-    except (AttributeError, ValueError, OSError):
+    except (AttributeError, ValueError, OSError, UnicodeEncodeError):
         pass
 
 
@@ -107,6 +129,11 @@ def local_address() -> str:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8777) -> None:
+    if sys.stdout is not None:
+        try:                      # кириллица в консоли Windows без кодовой страницы
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
     try:
         httpd = ThreadingHTTPServer((host, port), SyndicatHandler)
     except OSError as exc:

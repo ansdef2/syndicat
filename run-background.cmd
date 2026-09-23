@@ -1,6 +1,6 @@
 @echo off
 rem Фоновый запуск платформы «Синдикат» в Windows: окно не открывается,
-rem вывод пишется в syndicat.log рядом со скриптом.
+rem сервер сам ведёт журнал в syndicat.log рядом со скриптом.
 rem Использование:  run-background.cmd [порт]   (по умолчанию 8777)
 setlocal
 cd /d "%~dp0"
@@ -9,17 +9,17 @@ if "%PORT%"=="" set PORT=8777
 
 where pythonw >nul 2>&1
 if %errorlevel%==0 (
-  start "" /b pythonw -m syndicat --port %PORT% >>"%~dp0syndicat.log" 2>&1
+  start "" /b pythonw -m syndicat --port %PORT% --log "%~dp0syndicat.log"
   goto started
 )
 where pyw >nul 2>&1
 if %errorlevel%==0 (
-  start "" /b pyw -3 -m syndicat --port %PORT% >>"%~dp0syndicat.log" 2>&1
+  start "" /b pyw -3 -m syndicat --port %PORT% --log "%~dp0syndicat.log"
   goto started
 )
 where python >nul 2>&1
 if %errorlevel%==0 (
-  start "" /min python -m syndicat --port %PORT% >>"%~dp0syndicat.log" 2>&1
+  start "" /min python -m syndicat --port %PORT% --log "%~dp0syndicat.log"
   goto started
 )
 echo Python 3 не найден. Установите его с https://www.python.org/downloads/
