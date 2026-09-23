@@ -15,6 +15,18 @@ WEB_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DATA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 
+def say(text: str = "") -> None:
+    """Печать, безопасная при запуске без консоли.
+
+    Под pythonw.exe в Windows sys.stdout равен None, и обычный print
+    уронил бы сервер на первой же строке приветствия.
+    """
+    try:
+        print(text, flush=True)
+    except (AttributeError, ValueError, OSError):
+        pass
+
+
 class SyndicatHandler(BaseHTTPRequestHandler):
     server_version = "Syndicat/1.0"
 
@@ -33,7 +45,7 @@ class SyndicatHandler(BaseHTTPRequestHandler):
         self._send(code, body, "application/json; charset=utf-8")
 
     def log_message(self, fmt, *args):   # компактный однострочный лог
-        print(f"  {self.address_string()} {fmt % args}")
+        say(f"  {self.address_string()} {fmt % args}")
 
     # --- маршрутизация ------------------------------------------------------
     def do_GET(self):
@@ -98,17 +110,17 @@ def serve(host: str = "127.0.0.1", port: int = 8777) -> None:
     httpd = ThreadingHTTPServer((host, port), SyndicatHandler)
     shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown}:{port}/"
-    print("  СИНДИКАТ · локальная платформа")
-    print(f"  панель:      {url}")
-    print(f"  API:         {url}api/overview")
-    print(f"  выгрузка:    {url}api/export/calibration.csv")
+    say("  СИНДИКАТ · локальная платформа")
+    say(f"  панель:      {url}")
+    say(f"  API:         {url}api/overview")
+    say(f"  выгрузка:    {url}api/export/calibration.csv")
     if host in ("0.0.0.0", "::"):
-        print(f"  в локальной сети: http://{local_address()}:{port}/")
-        print("  внимание: панель открыта всем в сети, авторизации в ней нет")
-    print("  Ctrl+C - остановка\n")
+        say(f"  в локальной сети: http://{local_address()}:{port}/")
+        say("  внимание: панель открыта всем в сети, авторизации в ней нет")
+    say("  Ctrl+C - остановка\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n  остановлено")
+        say("\n  остановлено")
     finally:
         httpd.server_close()
