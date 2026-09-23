@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import posixpath
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -81,13 +82,29 @@ class SyndicatHandler(BaseHTTPRequestHandler):
             self._send(200, fh.read(), ctype or "application/octet-stream", cache=True)
 
 
+def local_address() -> str:
+    """Адрес машины в локальной сети - для доступа с другого устройства."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 1))   # адрес из TEST-NET-1: пакет не уходит
+        return probe.getsockname()[0]
+    except OSError:
+        return socket.gethostbyname(socket.gethostname())
+    finally:
+        probe.close()
+
+
 def serve(host: str = "127.0.0.1", port: int = 8777) -> None:
     httpd = ThreadingHTTPServer((host, port), SyndicatHandler)
-    url = f"http://{host}:{port}/"
+    shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    url = f"http://{shown}:{port}/"
     print("  СИНДИКАТ · локальная платформа")
     print(f"  панель:      {url}")
     print(f"  API:         {url}api/overview")
     print(f"  выгрузка:    {url}api/export/calibration.csv")
+    if host in ("0.0.0.0", "::"):
+        print(f"  в локальной сети: http://{local_address()}:{port}/")
+        print("  внимание: панель открыта всем в сети, авторизации в ней нет")
     print("  Ctrl+C - остановка\n")
     try:
         httpd.serve_forever()
