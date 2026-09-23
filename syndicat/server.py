@@ -107,7 +107,15 @@ def local_address() -> str:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8777) -> None:
-    httpd = ThreadingHTTPServer((host, port), SyndicatHandler)
+    try:
+        httpd = ThreadingHTTPServer((host, port), SyndicatHandler)
+    except OSError as exc:
+        # Самая частая причина - платформа уже запущена и держит порт.
+        say(f"  Порт {port} занят: {exc}")
+        say(f"  Либо платформа уже работает - откройте http://127.0.0.1:{port}/,")
+        say("  либо остановите её (stop.cmd в Windows) или возьмите другой порт:")
+        say(f"  python3 -m syndicat --port {port + 1}")
+        raise SystemExit(2)
     shown = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown}:{port}/"
     say("  СИНДИКАТ · локальная платформа")
