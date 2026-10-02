@@ -432,3 +432,102 @@ export function meter(host, opt) {
       "font-size": 10.5 }, nf(v, 3))));
   return svg;
 }
+
+/* --------------------------------------------------------------------------
+   Сетка поставок группы: колонки - стадии технологической цепочки, узлы -
+   предприятия, связи - внутригрупповые поставки за год. Толщина линии -
+   корень из объёма; сплошная - промежуточное потребление, пунктир -
+   поставка оборудования в основные фонды получателя.
+   ------------------------------------------------------------------------ */
+export function flowGrid(host, opt) {
+  const W = 1000, colW = 132, rowH = 30, top = 34, gap = (W - colW) / (opt.stages.length - 1);
+  const byStage = opt.stages.map((_, i) => opt.nodes
+    .filter((n) => n.stage === i + 1)
+    .sort((a, b) => opt.order[a.division] - opt.order[b.division] || b.output - a.output));
+  const H = top + Math.max(...byStage.map((c) => c.length)) * rowH + 8;
+  const { svg, tip } = frame(host, W, H);
+  svg.setAttribute("aria-label", opt.title || "Сетка внутригрупповых поставок");
+
+  const pos = {};
+  byStage.forEach((col, i) => {
+    const x = i * gap, offset = (H - top - col.length * rowH) / 2;
+    svg.appendChild(s("text", { x: x + colW / 2, y: 14, "text-anchor": "middle", class: "lbl",
+      fill: "var(--latun)", "font-size": 10.5 }, opt.stages[i]));
+    col.forEach((n, j) => { pos[n.id] = { x, y: top + offset + j * rowH, n }; });
+  });
+
+  const agg = {};
+  opt.flows.forEach((f) => {
+    const key = `${f.source}|${f.target}|${f.kind}`;
+    if (!agg[key]) agg[key] = { ...f, value: 0, items: [] };
+    agg[key].value += f.value;
+    agg[key].items.push(f);
+  });
+  const edges = Object.values(agg);
+  const max = Math.max(...edges.map((e) => e.value)) || 1;
+  edges.sort((a, b) => b.value - a.value).forEach((e) => {
+    const a = pos[e.source], b = pos[e.target];
+    if (!a || !b) return;
+    const x1 = a.x + colW, y1 = a.y + rowH / 2 - 2, x2 = b.x, y2 = b.y + rowH / 2 - 2;
+    const mx = (x1 + x2) / 2;
+    const path = s("path", { d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`,
+      fill: "none", stroke: opt.color(a.n.division), "stroke-opacity": 0.5,
+      "stroke-width": 1 + 9 * Math.sqrt(e.value / max), class: "mark-hit",
+      "stroke-dasharray": e.kind === "capital" ? "5 4" : "none" });
+    svg.appendChild(path);
+    path.addEventListener("mousemove", (evt) => showTip(host, tip, evt,
+      `${a.n.short} → ${b.n.short}`,
+      [...e.items.map((it) => [it.product, `${nf(it.units, 0)} ${it.unit}`]),
+       ["сумма за год", opt.format(e.value)],
+       ["вид", e.kind === "capital" ? "оборудование в фонды" : "промежуточное потребление"]]));
+    path.addEventListener("mouseleave", () => hideTip(tip));
+  });
+
+  Object.values(pos).forEach(({ x, y, n }) => {
+    const g = s("g", { class: "mark-hit" });
+    g.appendChild(s("rect", { x, y, width: colW, height: rowH - 6, fill: "var(--tush-3)",
+      stroke: "var(--hair)" }));
+    g.appendChild(s("rect", { x, y, width: 4, height: rowH - 6, fill: opt.color(n.division) }));
+    g.appendChild(s("text", { x: x + 10, y: y + 16, class: "lbl", fill: n.focus ? "var(--luch)" : "var(--grunt)",
+      "font-size": 11 }, n.short));
+    g.addEventListener("mousemove", (evt) => showTip(host, tip, evt, n.short, opt.nodeTip(n)));
+    g.addEventListener("mouseleave", () => hideTip(tip));
+    if (opt.onPick) g.addEventListener("click", () => opt.onPick(n));
+    svg.appendChild(g);
+  });
+  return svg;
+}
+
+/* --------------------------------------------------------------------------
+   Горизонтальные полосы со стеком: из чего складывается величина по строке.
+   Все части в одних единицах, поэтому делят одну шкалу.
+   ------------------------------------------------------------------------ */
+export function stackedH(host, opt) {
+  const rows = opt.rows, rowH = opt.rowH || 28, padL = opt.padL || 168, padR = 96;
+  const W = opt.width || 1000, H = rows.length * rowH + 16;
+  const { svg, tip } = frame(host, W, H);
+  svg.setAttribute("aria-label", opt.title || "Структура величины по строкам");
+  const total = (r) => opt.keys.reduce((acc, k) => acc + opt.value(r, k.key), 0);
+  const max = Math.max(...rows.map(total)) || 1, plot = W - padL - padR;
+  rows.forEach((r, i) => {
+    const y = i * rowH + 8;
+    svg.appendChild(s("text", { x: padL - 12, y: y + 14, "text-anchor": "end", class: "lbl" },
+      opt.label(r)));
+    let x = padL;
+    opt.keys.forEach((k) => {
+      const v = opt.value(r, k.key), w = (v / max) * plot;
+      if (w <= 0) return;
+      const rect = s("rect", { x, y: y + 3, width: Math.max(1, w), height: rowH - 10,
+        fill: k.color, class: "mark-hit" });
+      svg.appendChild(rect);
+      rect.addEventListener("mousemove", (evt) => showTip(host, tip, evt, opt.label(r),
+        [[k.label, opt.format(v)], ["доля", nf((v / total(r)) * 100, 1) + "%"],
+         ["всего", opt.format(total(r))]]));
+      rect.addEventListener("mouseleave", () => hideTip(tip));
+      x += w;
+    });
+    svg.appendChild(s("text", { x: x + 10, y: y + 14, class: "val" }, opt.format(total(r))));
+  });
+  legend(host, opt.keys.map((k) => ({ color: k.color, label: k.label })));
+  return svg;
+}

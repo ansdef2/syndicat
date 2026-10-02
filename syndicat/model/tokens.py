@@ -30,7 +30,7 @@ def hourly_labour_cost(wage_month: float) -> float:
 
 def industry_unit_values(code: str) -> dict:
     """Раскладка ВДС на один отработанный человеко-час: v = w + d + s."""
-    row = ind.INDUSTRIES[code]
+    row = ind.ALL_INDUSTRIES[code]
     w_total = hourly_labour_cost(row["wage"])
     labour_share = 1.0 - row["pi"] - row["d"]
     v = w_total / labour_share
@@ -93,56 +93,76 @@ def emission_breakdown(t_fact: float, t_norm: float, grade: int, cycle_days: flo
     return dict(tokens=value, factors=factors, steps=steps)
 
 
+# Сдвиг seed для классов вне периметра: их демо-ряды не пересекаются с рядами 20-30.
+EXTENDED_SEED_OFFSET = 100
+
+
+def _run_industry(code: str, phi: float, months: int, seed: int) -> dict:
+    """Слои 1-3 для одного класса: сглаживание Хольта и траектория базы часа."""
+    u = industry_unit_values(code)
+    observations = observation_path(u["s"], months, seed)
+    state, trace = run_holt(observations, level0=u["s"] * 0.92, trend0=u["s"] * 0.004)
+    s_smooth = state.forecast()
+
+    # Траектория базы часа с механическим ограничителем шага ±2%.
+    # Оплата труда в демо-ряде растёт с постоянным дрейфом и приходит
+    # к текущему значению w_j в последнем месяце: якорь калибровки
+    # (B = 876,58 руб./ТЧЧ) сохраняется.
+    base_path, previous = [], None
+    last = months - 1
+    for point in trace:
+        w_t = u["w_total"] * (1.0 + WAGE_DRIFT) ** (point["month"] - last)
+        raw = w_t + phi * (point["level"] + point["trend"])
+        clipped = clip_step(raw, previous)
+        previous = clipped
+        base_path.append(dict(month=point["month"], observation=point["observation"],
+                              level=point["level"], trend=point["trend"],
+                              wage_hour=w_t, base_raw=raw, base=clipped))
+
+    params = ind.ALL_INDUSTRIES[code]
+    return dict(
+        code=code, name=ind.name(code), short=ind.short(code),
+        w_hour=u["w_total"], vds_hour=u["v"], dep_hour=u["dep"],
+        s_raw=u["s"], s_smooth=s_smooth,
+        labour_share=u["labour_share"], capital_share=u["capital_share"],
+        depreciation_share=u["depreciation_share"],
+        base=base_path[-1]["base"], base_unclipped=token_base(code, s_smooth, phi),
+        mu=markup(code, s_smooth, phi),
+        cycle_days=params["cycle"],
+        k_cycle=cycle_coef(params["cycle"]),
+        hours_share=ind.HOURS_SHARE.get(code, 0.0),
+        wage_month=params["wage"],
+        path=base_path,
+    )
+
+
 @lru_cache(maxsize=8)
 def calibrate(phi: float = PHI, months: int = DEMO_MONTHS, seed: int = DEMO_SEED) -> dict:
     """Полный прогон слоёв 1-3 по периметру.
 
     Возвращает по каждому классу: сырой и сглаженный прибавочный продукт,
     траекторию базы часа с ограничителем ±2%, коэффициент k_j и надбавку μ_j,
-    а также сетевую единицу B.
+    а также сетевую единицу B. Классы вне периметра (ind.EXTENDED) считаются
+    той же формулой и лежат отдельно в "extended": в B они не входят.
     """
-    per_industry = {}
-    for code in ind.CODES:
-        u = industry_unit_values(code)
-        observations = observation_path(u["s"], months, seed + ind.INDEX[code])
-        state, trace = run_holt(observations, level0=u["s"] * 0.92, trend0=u["s"] * 0.004)
-        s_smooth = state.forecast()
-
-        # Траектория базы часа с механическим ограничителем шага ±2%.
-        # Оплата труда в демо-ряде растёт с постоянным дрейфом и приходит
-        # к текущему значению w_j в последнем месяце: якорь калибровки
-        # (B = 876,58 руб./ТЧЧ) сохраняется.
-        base_path, previous = [], None
-        last = months - 1
-        for point in trace:
-            w_t = u["w_total"] * (1.0 + WAGE_DRIFT) ** (point["month"] - last)
-            raw = w_t + phi * (point["level"] + point["trend"])
-            clipped = clip_step(raw, previous)
-            previous = clipped
-            base_path.append(dict(month=point["month"], observation=point["observation"],
-                                  level=point["level"], trend=point["trend"],
-                                  wage_hour=w_t, base_raw=raw, base=clipped))
-
-        per_industry[code] = dict(
-            code=code, name=ind.name(code), short=ind.short(code),
-            w_hour=u["w_total"], vds_hour=u["v"], dep_hour=u["dep"],
-            s_raw=u["s"], s_smooth=s_smooth,
-            labour_share=u["labour_share"], capital_share=u["capital_share"],
-            depreciation_share=u["depreciation_share"],
-            base=base_path[-1]["base"], base_unclipped=token_base(code, s_smooth, phi),
-            mu=markup(code, s_smooth, phi),
-            cycle_days=ind.INDUSTRIES[code]["cycle"],
-            k_cycle=cycle_coef(ind.INDUSTRIES[code]["cycle"]),
-            hours_share=ind.HOURS_SHARE[code],
-            wage_month=ind.INDUSTRIES[code]["wage"],
-            path=base_path,
-        )
+    per_industry = {code: _run_industry(code, phi, months, seed + ind.INDEX[code])
+                    for code in ind.CODES}
+    extended = {code: _run_industry(code, phi, months, seed + EXTENDED_SEED_OFFSET + i)
+                for i, code in enumerate(ind.EXTENDED)}
 
     B = sum(ind.HOURS_SHARE[c] * per_industry[c]["base"] for c in ind.CODES)
-    for code, row in per_industry.items():
+    for row in list(per_industry.values()) + list(extended.values()):
         row["k"] = row["base"] / B
         # месячный шаг базы, п.п.
         path = row["path"]
         row["step_month"] = (path[-1]["base"] / path[-2]["base"] - 1.0) if len(path) > 1 else 0.0
 
-    return dict(phi=phi, months=months, seed=seed, B=B, industries=per_industry)
+    return dict(phi=phi, months=months, seed=seed, B=B, industries=per_industry,
+                extended=extended)
+
+
+def industry_row(calib: dict, code: str) -> dict:
+    """Строка калибровки класса - из периметра или из расширения."""
+    if code in calib["industries"]:
+        return calib["industries"][code]
+    return calib["extended"][code]

@@ -15,6 +15,8 @@ const state = {
   cpi: 0.074,
   theta: 0.6,
   zeta: 0.5,
+  shock: 0,
+  city: "",
   factors: { energy: 0.12, fx: 0.08, rate: 0, logistics: 0, raw: 0 },
 };
 
@@ -26,6 +28,7 @@ const VIEWS = {
   channel: { title: "Каналы субститутов", sub: "квантили цен, замещаемость, экстерналии" },
   enterprises: { title: "Реестр предприятий", sub: "средние и крупные субъекты периметра 20-30" },
   indexation: { title: "Индексация заработной платы", sub: "локальный корпоративный контур" },
+  territories: { title: "Территории · Росатом", sub: "сетка предприятий группы, вклад в экономику городов, фонды" },
   model: { title: "Модель и параметры", sub: "шесть слоёв, уставные величины, границы применимости" },
 };
 
@@ -55,7 +58,8 @@ const actions = {
 };
 
 function syncHash() {
-  const short = { view: state.view, phi: state.phi, ent: state.ent, code: state.code };
+  const short = { view: state.view, phi: state.phi, ent: state.ent, code: state.code,
+    city: state.city, shock: state.shock || undefined };
   location.hash = qs(short);
 }
 
@@ -67,6 +71,8 @@ function readHash() {
   if (params.get("phi")) state.phi = parseFloat(params.get("phi"));
   if (params.get("ent")) state.ent = params.get("ent");
   if (params.get("code")) state.code = params.get("code");
+  if (params.get("city")) state.city = params.get("city");
+  if (params.get("shock")) state.shock = parseFloat(params.get("shock")) || 0;
 }
 
 async function render() {
@@ -115,6 +121,10 @@ async function render() {
         V.indexation(node, data, state, actions);
         break;
       }
+      case "territories":
+        V.territories(node, await api("/api/territories",
+          { phi: state.phi, shock: state.shock, cpi: state.cpi }), state, actions);
+        break;
       case "model":
         V.model(node, await api("/api/model", {}), state, actions);
         break;

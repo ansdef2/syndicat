@@ -22,8 +22,8 @@
 
 from .constants import (INDEX_CAP, INDEX_STEP_MONTHS, PERSONAL_CAP, PHI, THETA,
                         ZETA)
-from .enterprises import BY_ID, personnel_profile, profile
-from .tokens import calibrate, skill_coef
+from .enterprises import ALL_BY_ID, BY_ID, personnel_profile, profile
+from .tokens import calibrate, industry_row, skill_coef
 
 # Демонстрационный ИПЦ: Росстат, годовой прирост потребительских цен.
 DEFAULT_CPI = 0.074
@@ -31,7 +31,7 @@ DEFAULT_CPI = 0.074
 
 def base_growth(code: str, phi: float = PHI, months: int = INDEX_STEP_MONTHS) -> float:
     """Δb_j за шаг индексации по траектории базы часа с ограничителем ±2%."""
-    path = calibrate(phi)["industries"][code]["path"]
+    path = industry_row(calibrate(phi), code)["path"]
     if len(path) <= months:
         months = len(path) - 1
     return path[-1]["base"] / path[-1 - months]["base"] - 1.0
@@ -54,7 +54,7 @@ def clip(value: float, lo: float, hi: float) -> float:
 def indexation(ent_id: str, cpi: float = DEFAULT_CPI, theta: float = THETA,
                zeta: float = ZETA, phi: float = PHI) -> dict:
     """Шаг индексации по предприятию: по разрядам, с бюджетным ограничением."""
-    ent = BY_ID[ent_id]
+    ent = ALL_BY_ID[ent_id]
     prof = profile(ent_id, phi)
     delta_b = base_growth(ent["cls"], phi)
     productive = theta * max(0.0, delta_b - cpi)

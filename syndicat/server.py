@@ -74,13 +74,15 @@ class SyndicatHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
-        if path == "/api/export/calibration.csv":
+        exports = {"/api/export/calibration.csv": (api.calibration_csv, "syndicat-calibration.csv"),
+                   "/api/export/territories.csv": (api.territories_csv, "syndicat-territories.csv")}
+        if path in exports:
             from urllib.parse import parse_qs
-            body = ("﻿" + api.calibration_csv(parse_qs(parsed.query or ""))).encode("utf-8")
+            build, filename = exports[path]
+            body = ("﻿" + build(parse_qs(parsed.query or ""))).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/csv; charset=utf-8")
-            self.send_header("Content-Disposition",
-                             'attachment; filename="syndicat-calibration.csv"')
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

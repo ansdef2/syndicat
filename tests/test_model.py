@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from syndicat import api, linalg
 from syndicat.model import analytics, costing, enterprises, indexation, industries
-from syndicat.model import pricing, tokens
+from syndicat.model import pricing, rosatom, territories, tokens
 from syndicat.model.constants import ALPHA, BETA, MAX_STEP, PHI
 from syndicat.model.smoothing import clip_step
 
@@ -252,6 +252,116 @@ class TestApi(unittest.TestCase):
         low, _ = api.dispatch("/api/overview", "phi=0.10")
         high, _ = api.dispatch("/api/overview", "phi=0.45")
         self.assertLess(low["B"], high["B"])
+
+
+class TestTerritories(unittest.TestCase):
+    """Территориальный контур: сетка группы «Росатом» и города присутствия."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = territories.territories()
+        cls.shocked = territories.territories(shock=-0.15)
+
+    def test_extended_classes_do_not_move_network_unit(self):
+        calib = tokens.calibrate()
+        self.assertEqual(set(calib["industries"]), set(industries.CODES))
+        self.assertEqual(set(calib["extended"]), set(industries.EXTENDED))
+        self.assertAlmostEqual(calib["B"], 876.58, delta=0.01)
+
+    def test_enterprise_identity(self):
+        """V = W + D + S по каждому предприятию сетки (слой 1)."""
+        for r in self.base["rows"]:
+            self.assertAlmostEqual(r["V"], r["W"] + r["D"] + r["S"], delta=1.0, msg=r["id"])
+            self.assertAlmostEqual(r["output"], r["internal_sales"] + r["external_sales"], delta=1.0)
+            self.assertGreaterEqual(r["external_purchases"], 0.0, r["id"])
+            self.assertGreater(r["S"], 0.0, r["id"])
+
+    def test_consolidation_eliminates_internal_turnover(self):
+        """Σ S = внешняя выручка + оборудование внутри группы − внешние закупки − W − D."""
+        for data in (self.base, self.shocked):
+            t = data["totals"]
+            lhs = sum(r["S"] for r in data["rows"])
+            rhs = t["revenue"] + t["capital_internal"] - t["external_purchases"] - t["W"] - t["D"]
+            self.assertAlmostEqual(lhs, rhs, delta=1e3)
+
+    def test_internal_flows_match(self):
+        sold = sum(r["internal_sales"] for r in self.base["rows"])
+        self.assertAlmostEqual(sold, self.base["totals"]["internal_turnover"], delta=1.0)
+        bought = sum(r["internal_purchases"] + r["capital_received"] for r in self.base["rows"])
+        self.assertAlmostEqual(sold, bought, delta=1.0)
+
+    def test_full_labour_over_group_grid(self):
+        rows = {r["id"]: r for r in self.base["rows"]}
+        for r in rows.values():
+            self.assertGreaterEqual(r["full"], r["direct"] - 1e-15, r["id"])
+            self.assertAlmostEqual(sum(r["by_division"].values()), r["full"], places=12)
+        # в киловатт-час станции упакован труд топливной цепочки
+        self.assertGreater(rows["kalinin"]["by_division"]["fuel"], 0.0)
+        self.assertGreater(rows["kalinin"]["by_division"]["mining"], 0.0)
+        self.assertGreater(rows["kalinin"]["multiplier"], 1.2)
+        # добыча - начало цепочки: ничего внутри группы не покупает
+        self.assertAlmostEqual(rows["ppgho"]["multiplier"], 1.0, places=9)
+
+    def test_price_shock_hits_only_external_sales(self):
+        base = {r["id"]: r for r in self.base["rows"]}
+        for r in self.shocked["rows"]:
+            b = base[r["id"]]
+            self.assertAlmostEqual(r["internal_sales"], b["internal_sales"], delta=1.0)
+            self.assertAlmostEqual(r["S"] - b["S"], -0.15 * b["external_sales"], delta=1.0)
+            self.assertAlmostEqual(r["W"], b["W"], delta=1.0)
+
+    def test_city_contribution_components(self):
+        for c in self.base["cities"]:
+            parts = c["income_month"] + c["budget_month"] + c["purchases_month"] + c["territory_fund_month"]
+            self.assertAlmostEqual(c["contribution_month"], parts, delta=1.0, msg=c["id"])
+            self.assertEqual(c["city_forming"], c["dependence"] >= 0.20, c["id"])
+            self.assertLessEqual(c["dependence"], c["group_share"] + 1e-12)
+
+    def test_small_npp_towns_are_city_forming(self):
+        cities = {c["id"]: c for c in self.base["cities"]}
+        for cid in ("udomlya", "desnogorsk", "polyarnye_zori", "novovoronezh"):
+            self.assertTrue(cities[cid]["city_forming"], cid)
+        for cid in ("novosibirsk", "spb", "podolsk"):
+            self.assertFalse(cities[cid]["city_forming"], cid)
+
+    def test_fund_split_follows_charter(self):
+        for c in self.base["cities"]:
+            accumulation = c["development_month"] + c["territory_fund_month"] + c["reserve_month"]
+            self.assertAlmostEqual(accumulation, (1 - PHI) * max(c["S_month"], 0.0), delta=1.0)
+            self.assertAlmostEqual(c["socialised_month"], PHI * max(c["S_month"], 0.0), delta=1.0)
+
+    def test_phi_zero_socialises_nothing(self):
+        data = territories.territories(phi=0.0)
+        self.assertEqual(data["totals"]["socialised_month"], 0.0)
+        self.assertGreater(data["totals"]["territory_fund_month"], 0.0)
+
+    def test_fund_adjusts_within_step_limit(self):
+        path = territories.smoothed_path(100.0, 50.0, months=40)
+        prev = 100.0
+        for v in path:
+            self.assertGreaterEqual(v / prev, 1 - MAX_STEP - 1e-12)
+            prev = v
+        self.assertAlmostEqual(path[-1], 50.0)
+        self.assertIsNone(territories.adjust_months(100.0, -5.0))
+        self.assertEqual(territories.adjust_months(100.0, 100.0 * 0.98 ** 3), 3)
+
+    def test_shock_flags_deficit_in_enrichment_towns(self):
+        cities = {c["id"]: c for c in self.shocked["cities"]}
+        self.assertTrue(cities["novouralsk"]["deficit"])
+        self.assertFalse(cities["udomlya"]["deficit"])
+
+    def test_group_registry_stays_outside_perimeter_summaries(self):
+        ids = {e["id"] for e in enterprises.list_enterprises()}
+        self.assertFalse(ids & set(rosatom.BY_ID))
+        prof = enterprises.profile("kalinin")
+        self.assertGreater(prof["tokens_month"], 0)
+
+    def test_api_and_csv(self):
+        data, error = api.dispatch("/api/territories", "phi=0.35&shock=-0.1&cpi=0.08")
+        self.assertIsNone(error)
+        json.dumps(data, ensure_ascii=False, allow_nan=False)
+        lines = api.territories_csv({}).strip().splitlines()
+        self.assertEqual(len(lines), len(self.base["cities"]) + 1)
 
 
 if __name__ == "__main__":
