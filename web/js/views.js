@@ -946,3 +946,289 @@ export function model(root, d) {
       </section>
     </div>`;
 }
+
+/* ------------------------------------------------- территориальный контур */
+const DIV_COLOR = { mining: "var(--ser-3)", fuel: "var(--ser-2)", radiochem: "#7FA391",
+  machine: "var(--ser-1)", power: "var(--luch)" };
+const bn = (v) => nf(v / 1e9, 1);
+
+export function territories(root, d, state, actions) {
+  const t = d.totals, p = d.params;
+  const city = d.cities.find((c) => c.id === state.city) || d.cities.find((c) => c.city_forming) || d.cities[0];
+  const divOrder = Object.fromEntries(d.divisions_meta.map((x, i) => [x.key, i]));
+  const shockOn = Math.abs(d.shock) > 1e-9;
+
+  root.innerHTML = `
+    <div class="filters">
+      <div class="f"><span>ценовой шок внешних продаж, %</span>
+        <input type="number" step="1" id="shock" value="${nf(d.shock * 100, 0).replace(",", ".").replace("−", "-")}" style="width:110px"></div>
+      <div class="f"><span>ИПЦ за период, %</span>
+        <input type="number" step="0.1" id="cpi" value="${nf(d.cpi * 100, 1).replace(",", ".")}" style="width:92px"></div>
+      <div class="f"><span>карточка города</span>
+        <select id="city">${d.cities.map((c) =>
+          `<option value="${c.id}" ${c.id === city.id ? "selected" : ""}>${c.name}${c.city_forming ? " · градообразующее" : ""}</option>`).join("")}</select></div>
+    </div>
+    <div class="grid">
+      <section class="card span-12">
+        <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+          <span class="tag"><em>территориальный контур</em></span>
+          <h3>${d.group}: сетка предприятий и городов присутствия</h3>
+          <div style="flex:1"></div>
+          <a class="btn ghost" href="/api/export/territories.csv?phi=${d.phi}&shock=${d.shock}&cpi=${d.cpi}">CSV по городам</a>
+        </div>
+        <div class="tiles" style="margin-top:16px">
+          ${tile(`${t.enterprises} / ${t.cities}`, "предприятий / городов", `${t.city_forming} городов с градообразующим предприятием`)}
+          ${tile(bn(t.revenue) + " млрд", "внешняя выручка, ₽/год", `экспорт ${bn(t.export)} млрд ₽`, true)}
+          ${tile(pct0(t.conversion, 1), "конвертация выпуска на рынке", `выпуск ${bn(t.output)} млрд ₽`)}
+          ${tile(bn(t.internal_turnover) + " млрд", "внутригрупповой оборот, ₽/год", `в т.ч. оборудование ${bn(t.capital_internal)} млрд`)}
+          ${tile(compact(t.clearing_tokens_year), "ТЧЧ клиринга в год", `до ${pct0(t.acceptance_cap, 0)} сделки в ТЧЧ по уставу`)}
+          ${tile(bn(t.V) + " млрд", "ВДС = W + D + S, ₽/год", `S ${bn(t.S)} · W ${bn(t.W)} · D ${bn(t.D)}`)}
+          ${tile(compact(t.contribution_month, " ₽"), "вклад в экономику городов", "в месяц, все города присутствия", true)}
+          ${tile(compact(t.socialised_month, " ₽"), "фонд φ·S в месяц", `при φ = ${nf(d.phi, 2)}${shockOn ? `, шок ${pct(d.shock, 0)}` : ""}`)}
+        </div>
+      </section>
+
+      <section class="card span-12">
+        <h3>Сетка группы: внутригрупповые поставки</h3>
+        <p class="cap">Колонки - стадии цепочки, толщина связи - объём за год. Сплошная линия -
+          промежуточное потребление (входит в матрицу A группы и в полные трудозатраты),
+          пунктир - оборудование в основные фонды получателя. Наведите на узел или связь.</p>
+        <div class="chart" id="grid-flow"></div>
+      </section>
+
+      <section class="card span-7">
+        <h3>Доходы и расходы концерна по дивизионам</h3>
+        <p class="cap">Млрд ₽ в год. Выручка концерна - только внешние продажи: внутригрупповой
+          оборот при консолидации взаимно исключается. Прибавочный продукт S - остаток
+          добавленной стоимости после оплаты труда W и амортизации D (слой 1).</p>
+        <div class="scroll"><table class="tbl" id="div-table"></table></div>
+      </section>
+
+      <section class="card span-5">
+        <h3>Полные трудозатраты электроэнергии по цепочке</h3>
+        <p class="cap">Человеко-часов на 1 ГВт·ч: h = l·(I − A)⁻¹ по сетке группы. Видно, сколько
+          труда добычи, обогащения и фабрикации топлива упаковано в киловатт-час станции.</p>
+        <div class="chart" id="npp-chain"></div>
+      </section>
+
+      <section class="card span-12">
+        <h3>Вклад в экономику городов присутствия</h3>
+        <p class="cap">₽ в месяц. Вклад = чистые доходы работников (ФОТ без НДФЛ) + НДФЛ в бюджет
+          городского округа (норматив ${pct0(p.local_ndfl, 0)}) + местные закупки
+          (${pct0(p.local_purchase, 0)} внешних закупок) + территориальный фонд
+          (${pct0(p.territory, 0)} несоциализированной части S по уставу). Градообразующее -
+          крупнейшее предприятие группы даёт не меньше ${pct0(p.threshold, 0)} занятости города
+          (занятые - ${pct0(p.employed_share, 0)} населения, демонстрационно).</p>
+        <div class="scroll"><table class="tbl" id="city-table"></table></div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Зависимость города от предприятия группы</h3>
+        <p class="cap">Доля крупнейшего предприятия группы в занятости города. Пунктир - порог
+          градообразующего предприятия.</p>
+        <div class="chart" id="dependence"></div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Вклад на жителя</h3>
+        <p class="cap">₽ в месяц на одного жителя. В малых городах атомной генерации вклад
+          на порядок выше, чем в крупных городах с тем же числом работников группы.</p>
+        <div class="chart" id="per-resident"></div>
+      </section>
+
+      <section class="card span-12">
+        <h3>Сводная модель управления финансовыми активами территорий</h3>
+        <p class="cap">₽ в месяц. Добавленная стоимость предприятий города раскладывается на фонды:
+          амортизационный D, социализируемый φ·S (индексация и часы), развития, территориальный
+          и резерв - доли (1 − φ)·S по уставу ${nf(p.development, 2)} / ${nf(p.territory, 2)} /
+          ${nf(p.reserve, 2)}. Покрытие - фонд φ·S к потребности индексации по трём контурам.
+          ${shockOn ? `При шоке ${pct(d.shock, 0)} фонд идёт к новому уровню не быстрее
+          ${pct0(p.max_step, 0)} в месяц - тот же ограничитель, что у базы часа; разницу за 12
+          месяцев закрывает резерв.` : "Задайте ценовой шок, чтобы увидеть подстройку фондов."}</p>
+        <div class="scroll"><table class="tbl" id="fund-table"></table></div>
+      </section>
+
+      <section class="card span-12" id="city-card"></section>
+
+      <section class="card span-12">
+        <h3>Сетка предприятий: тождество V = W + D + S и рента</h3>
+        <p class="cap">Млрд ₽ в год. Рента R = 1 − p: p - цена производства рубля выпуска через
+          полные трудозатраты по сетке группы и внешние закупки по рыночному рублю. Положительная
+          рента - выработка выше отраслевой, отрицательная - ниже.</p>
+        <div class="scroll"><table class="tbl" id="ent-grid"></table></div>
+        <p class="note" style="margin-top:14px">${d.disclaimer}</p>
+      </section>
+    </div>`;
+
+  const num = (id, scale) => {
+    const v = parseFloat(q(root, id).value.replace(",", "."));
+    return Number.isFinite(v) ? v / scale : undefined;
+  };
+  q(root, "#shock").addEventListener("change", () => actions.set({ shock: num("#shock", 100) || 0 }));
+  q(root, "#cpi").addEventListener("change", () => actions.set({ cpi: num("#cpi", 100) ?? 0.074 }));
+  q(root, "#city").addEventListener("change", (e) => actions.set({ city: e.target.value }));
+
+  const rowsById = Object.fromEntries(d.rows.map((r) => [r.id, r]));
+  C.flowGrid(q(root, "#grid-flow"), {
+    nodes: d.nodes.map((n) => ({ ...n, focus: n.city === city.name })), flows: d.flows,
+    stages: ["Добыча", "Конверсия", "Обогащение, цирконий", "Топливо, радиохимия, оборудование", "Атомные станции"],
+    order: divOrder, color: (div) => DIV_COLOR[div], format: (v) => bn(v) + " млрд ₽",
+    nodeTip: (n) => {
+      const r = rowsById[n.id];
+      return [["город", r.city], ["дивизион", r.division_name], ["выпуск", bn(r.output) + " млрд ₽/год"],
+        ["на внешний рынок", pct0(r.conversion, 1)], ["рента", pct(r.rent, 1)]];
+    },
+    onPick: (n) => actions.set({ city: rowsById[n.id].city_id }),
+  });
+  C.legend(q(root, "#grid-flow"), d.divisions_meta.map((x) => ({ color: DIV_COLOR[x.key], label: x.short })));
+
+  table(q(root, "#div-table"), d.divisions.map((x) => ({ ...x, id: x.key })), [
+    { k: "short", t: "Дивизион", f: (r) => `<span class="name">${r.short}<i>${r.enterprises} предпр. · ${nf(r.headcount, 0)} чел.</i></span>` },
+    { k: "external_sales", t: "Внешняя выручка", f: (r) => `<b>${bn(r.external_sales)}</b>` },
+    { k: "export", t: "Экспорт", f: (r) => bn(r.export) },
+    { k: "internal_sales", t: "Внутри группы", f: (r) => bn(r.internal_sales) },
+    { k: "conversion", t: "Конвертация", f: (r) => pct0(r.conversion, 0) },
+    { k: "external_purchases", t: "Внешние закупки", f: (r) => bn(r.external_purchases) },
+    { k: "W", t: "Труд W", f: (r) => bn(r.W) },
+    { k: "D", t: "Амортизация D", f: (r) => bn(r.D) },
+    { k: "S", t: "Приб. продукт S", f: (r) => `<span class="${r.S >= 0 ? "pos" : "neg"}">${bn(r.S)}</span>` },
+  ], "external_sales");
+
+  const npp = d.rows.filter((r) => r.division === "power");
+  C.stackedH(q(root, "#npp-chain"), {
+    rows: [...npp].sort((a, b) => b.full - a.full), width: 620, padL: 200, rowH: 30,
+    label: (r) => r.short,
+    keys: d.divisions_meta.filter((x) => x.key !== "machine").map((x) => ({ key: x.key, label: x.short, color: DIV_COLOR[x.key] })),
+    value: (r, key) => (r.by_division[key] || 0) * r.products[0].market_price * 1000,
+    format: (v) => nf(v, 0) + " ч",
+  });
+
+  table(q(root, "#city-table"), d.cities, [
+    { k: "name", t: "Город", f: (r) => `<span class="name">${r.name}${r.zato ? " · ЗАТО" : ""}<i>${r.region} · ${r.enterprises.map((e) => e.short).join(", ")}</i></span>` },
+    { k: "population", t: "Население", f: (r) => nf(r.population, 0) },
+    { k: "headcount", t: "Работники группы", f: (r) => nf(r.headcount, 0) },
+    { k: "dependence", t: "Доля в занятости", f: (r) => `<span class="${r.city_forming ? "neg" : ""}">${pct0(r.dependence, 1)}</span>${r.city_forming ? "<br><span style=\"color:var(--ink-3)\">градообразующее</span>" : ""}` },
+    { k: "income_month", t: "Доходы работников", f: (r) => compact(r.income_month, "") },
+    { k: "budget_month", t: "НДФЛ городу", f: (r) => compact(r.budget_month, "") },
+    { k: "purchases_month", t: "Местные закупки", f: (r) => compact(r.purchases_month, "") },
+    { k: "territory_fund_month", t: "Территор. фонд", f: (r) => compact(r.territory_fund_month, "") },
+    { k: "contribution_month", t: "Вклад, ₽/мес", f: (r) => `<b>${compact(r.contribution_month, "")}</b>` },
+    { k: "contribution_per_resident", t: "На жителя", f: (r) => nf(r.contribution_per_resident, 0) },
+  ], "contribution_month", (r) => r.id === city.id);
+  q(root, "#city-table").querySelectorAll("tbody tr").forEach((tr) =>
+    tr.addEventListener("click", () => actions.set({ city: tr.dataset.id })));
+
+  C.barsH(q(root, "#dependence"), {
+    rows: [...d.cities].sort((a, b) => b.dependence - a.dependence), padL: 150, rowH: 24,
+    label: (r) => r.name, value: (r) => r.dependence * 100, max: 50,
+    refValue: p.threshold * 100, refLabel: `порог ${pct0(p.threshold, 0)}`,
+    color: (r) => (r.id === city.id ? "var(--luch)" : r.city_forming ? "var(--ser-1)" : "var(--ser-2)"),
+    format: (v) => nf(v, 1) + "%", tipTitle: (r) => r.name,
+    tip: (r) => [["крупнейшее предприятие", r.city_forming_name], ["доля в занятости", pct0(r.dependence, 1)],
+      ["вся группа", pct0(r.group_share, 1)], ["население", nf(r.population, 0)]],
+  });
+  C.legend(q(root, "#dependence"), [{ color: "var(--ser-1)", label: "градообразующее" },
+    { color: "var(--ser-2)", label: "ниже порога" }, { color: "var(--luch)", label: "выбранный город" }]);
+
+  C.barsH(q(root, "#per-resident"), {
+    rows: [...d.cities].sort((a, b) => b.contribution_per_resident - a.contribution_per_resident),
+    padL: 150, rowH: 24, label: (r) => r.name, value: (r) => r.contribution_per_resident,
+    color: (r) => (r.id === city.id ? "var(--luch)" : "var(--ser-2)"),
+    format: (v) => nf(v, 0) + " ₽", tipTitle: (r) => r.name,
+    tip: (r) => [["вклад в месяц", compact(r.contribution_month, " ₽")], ["население", nf(r.population, 0)],
+      ["на жителя", nf(r.contribution_per_resident, 0) + " ₽"]],
+  });
+
+  table(q(root, "#fund-table"), d.cities, [
+    { k: "name", t: "Территория", f: (r) => `<span class="name">${r.name}<i>активы ${compact(r.assets, " ₽")}</i></span>` },
+    { k: "V_month", t: "ВДС", f: (r) => compact(r.V_month, "") },
+    { k: "D_month", t: "Аморт. фонд D", f: (r) => compact(r.D_month, "") },
+    { k: "S_month", t: "S", f: (r) => `<span class="${r.S_month >= 0 ? "pos" : "neg"}">${compact(r.S_month, "")}</span>` },
+    { k: "socialised_month", t: "Фонд φ·S", f: (r) => `<b>${compact(r.socialised_month, "")}</b>` },
+    { k: "indexation_need_month", t: "Потребность индексации", f: (r) => compact(r.indexation_need_month, "") },
+    { k: "coverage", t: "Покрытие", f: (r) => `<span class="${r.coverage >= 1 ? "pos" : "neg"}">${nf(r.coverage, 2)}</span>` },
+    { k: "development_month", t: "Фонд развития", f: (r) => compact(r.development_month, "") },
+    { k: "territory_fund_month", t: "Территор. фонд", f: (r) => compact(r.territory_fund_month, "") },
+    { k: "reserve_month", t: "Резерв", f: (r) => compact(r.reserve_month, "") },
+    ...(shockOn ? [
+      { k: "smoothed_12", t: "φ·S через 12 мес", f: (r) => compact(r.smoothed_12, "") },
+      { k: "reserve_draw_12", t: "Из резерва за 12 мес", f: (r) => compact(r.reserve_draw_12, "") },
+      { k: "adjust_months", t: "Подстройка", f: (r) => (r.deficit ? '<span class="neg">дефицит: решение правления</span>'
+        : r.adjust_months === null ? "—" : `${r.adjust_months} мес`) },
+    ] : []),
+  ], "socialised_month", (r) => r.id === city.id);
+
+  cityCard(q(root, "#city-card"), city, d.rows.filter((r) => r.city_id === city.id), d);
+
+  table(q(root, "#ent-grid"), d.rows, [
+    { k: "short", t: "Предприятие", f: (r) => `<span class="name">${r.short}<i>${r.city} · ${r.okved} · ${r.industry_short}</i></span>` },
+    { k: "output", t: "Выпуск", f: (r) => bn(r.output) },
+    { k: "conversion", t: "На рынок", f: (r) => pct0(r.conversion, 0) },
+    { k: "V", t: "ВДС V", f: (r) => bn(r.V) },
+    { k: "W", t: "Труд W", f: (r) => bn(r.W) },
+    { k: "D", t: "Аморт. D", f: (r) => bn(r.D) },
+    { k: "S", t: "S", f: (r) => `<span class="${r.S >= 0 ? "pos" : "neg"}">${bn(r.S)}</span>` },
+    { k: "multiplier", t: "Множитель цепочки", f: (r) => "×" + nf(r.multiplier, 2) },
+    { k: "rent", t: "Рента", f: (r) => `<span class="${r.rent >= 0 ? "neg" : "pos"}">${pct(r.rent, 1)}</span>` },
+    { k: "k", t: "k_j", f: (r) => nf(r.k, 3) },
+    { k: "tokens_month", t: "ТЧЧ/мес", f: (r) => compact(r.tokens_month) },
+  ], "output", (r) => r.city_id === city.id);
+}
+
+function cityCard(node, c, rows, d) {
+  node.innerHTML = `
+    <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+      <span class="tag${c.city_forming ? "" : " quiet"}"><em>${c.city_forming ? "градообразующее" : "присутствие группы"}</em></span>
+      <h3>${c.name}${c.zato ? " · ЗАТО" : ""}</h3>
+      <span class="note">${c.region} · население ${nf(c.population, 0)} · ${rows.map((r) => r.short).join(", ")}</span>
+    </div>
+    <div class="rule"></div>
+    <div class="tiles">
+      ${tile(pct0(c.dependence, 1), "доля в занятости города", `${c.city_forming_name} · вся группа ${pct0(c.group_share, 1)}`, c.city_forming)}
+      ${tile(compact(c.contribution_month, " ₽"), "вклад в экономику, в месяц", `${nf(c.contribution_per_resident, 0)} ₽ на жителя`, true)}
+      ${tile(compact(c.budget_month, " ₽"), "НДФЛ в бюджет города", `в регион ${compact(c.budget_region_month, " ₽")}`)}
+      ${tile(compact(c.socialised_month, " ₽"), "фонд φ·S", `покрытие индексации ${nf(c.coverage, 2)}`, c.coverage >= 1)}
+      ${tile(compact(c.territory_fund_month, " ₽"), "территориальный фонд", "доля (1 − φ)·S по уставу")}
+      ${tile(compact(c.capital_month, " ₽"), "оборудование от группы", "в основные фонды, в месяц")}
+      ${tile(compact(c.tokens_month), "ТЧЧ эмиссии в месяц", `${nf(c.headcount, 0)} работников группы`)}
+      ${tile(compact(c.assets, " ₽"), "основные фонды", "предприятий группы в городе")}
+    </div>
+    ${c.deficit ? `<p class="warn" style="margin-top:14px">После шока прибавочный продукт
+      предприятий города отрицателен: фонд φ·S снижается по ${pct0(d.params.max_step, 0)} в месяц,
+      разницу закрывает резерв. Требуется решение правления.</p>` : ""}
+    <div class="grid" style="margin-top:20px">
+      <div class="span-7">
+        <h3 style="font-size:14px">Предприятия группы в городе</h3>
+        <div class="scroll"><table class="tbl" id="city-ents"></table></div>
+      </div>
+      <div class="span-5">
+        <h3 style="font-size:14px">Куда идёт добавленная стоимость, ₽ в месяц</h3>
+        <div class="chart" id="city-funds"></div>
+      </div>
+    </div>`;
+
+  table(node.querySelector("#city-ents"), rows.flatMap((r) => r.products.map((pr, i) => ({
+    id: `${r.id}-${i}`, ent: r.short, name: pr.name, unit: pr.unit, volume: pr.volume,
+    conversion: pr.conversion, external: pr.external, internal: pr.internal,
+    hours: r.full * pr.market_price,
+  }))), [
+    { k: "name", t: "Продукция", f: (r) => `<span class="name">${r.name}<i>${r.ent}</i></span>` },
+    { k: "volume", t: "Объём в год", f: (r) => `${nf(r.volume, 0)} ${r.unit}` },
+    { k: "external", t: "На рынок, ₽", f: (r) => compact(r.external, "") },
+    { k: "internal", t: "В группу, ₽", f: (r) => compact(r.internal, "") },
+    { k: "conversion", t: "Конвертация", f: (r) => pct0(r.conversion, 0) },
+    { k: "hours", t: "Полные чел.-ч на ед.", f: (r) => nf(r.hours, r.hours < 10 ? 2 : 0) },
+  ], "external");
+
+  const parts = [
+    ["Оплата труда W", c.W_month, "var(--ser-2)"], ["Амортизационный фонд D", c.D_month, "var(--ser-3)"],
+    ["Фонд φ·S", c.socialised_month, "var(--luch)"], ["Фонд развития", c.development_month, "var(--ser-1)"],
+    ["Территориальный фонд", c.territory_fund_month, "#7FA391"], ["Резерв", c.reserve_month, "var(--ink-3)"],
+  ].map(([label, value, color]) => ({ label, value: Math.max(0, value), color }));
+  C.barsH(node.querySelector("#city-funds"), {
+    rows: parts, width: 620, padL: 190, padR: 100, rowH: 32,
+    label: (r) => r.label, value: (r) => r.value, color: (r) => r.color,
+    format: (v) => compact(v, " ₽"), tipTitle: (r) => r.label,
+    tip: (r) => [["в месяц", compact(r.value, " ₽")], ["доля ВДС", pct0(c.V_month ? r.value / c.V_month : 0, 1)]],
+  });
+}

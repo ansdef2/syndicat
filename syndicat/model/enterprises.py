@@ -16,7 +16,8 @@
 
 from . import industries as ind
 from .constants import HOURS_PER_MONTH
-from .tokens import calibrate, cycle_coef, emission, emission_breakdown, skill_coef
+from .tokens import (calibrate, cycle_coef, emission, emission_breakdown, industry_row,
+                     skill_coef)
 
 DISCLAIMER = ("Наименование, регион и класс ОКВЭД - фактические. "
               "Численность, выручка, фонды, трудоёмкость и цены - "
@@ -193,6 +194,19 @@ ENTERPRISES = [
 
 BY_ID = {e["id"]: e for e in ENTERPRISES}
 
+# Реестры других контуров (например, территориальная сетка «Росатома») регистрируют
+# свои субъекты здесь, чтобы профиль, эмиссия и индексация считались одной моделью.
+# Сводки периметра (list_enterprises, обзор сети) по-прежнему идут только по ENTERPRISES.
+ALL_BY_ID = dict(BY_ID)
+
+
+def register(entries) -> None:
+    """Добавить субъекты стороннего реестра в общий поиск по идентификатору."""
+    for ent in entries:
+        if ent["id"] in ALL_BY_ID and ALL_BY_ID[ent["id"]] is not ent:
+            raise ValueError(f"идентификатор занят: {ent['id']}")
+        ALL_BY_ID[ent["id"]] = ent
+
 # Структура производственного персонала по разрядам ЕТКС (доли).
 # Смещается вокруг среднего разряда предприятия.
 GRADE_SCALE = [2, 3, 4, 5, 6, 7]
@@ -209,7 +223,7 @@ def personnel_profile(ent: dict) -> list:
         share = w / total_w
         headcount = round(prod_staff * share)
         # тарифная ставка разряда от средней зарплаты класса ОКВЭД
-        base_wage = ind.INDUSTRIES[ent["cls"]]["wage"]
+        base_wage = ind.ALL_INDUSTRIES[ent["cls"]]["wage"]
         wage = base_wage * skill_coef(g) / skill_coef(round(avg))
         rows.append(dict(grade=g, headcount=headcount, share=share,
                          wage_month=wage, skill_coef=skill_coef(g)))
@@ -225,24 +239,24 @@ def profile(ent_id: str, phi: float = None) -> dict:
     """Полный расчётный профиль предприятия: эмиссия ТЧЧ, фонды, показатели."""
     from .constants import PHI
     phi = PHI if phi is None else phi
-    ent = BY_ID[ent_id]
+    ent = ALL_BY_ID[ent_id]
     calib = calibrate(phi)
-    row = calib["industries"][ent["cls"]]
+    row = industry_row(calib, ent["cls"])
     B, k = calib["B"], row["k"]
 
     hours = hours_month(ent)
     k_skill = skill_coef(round(ent["avg_grade"]))
-    k_cycle = cycle_coef(ind.INDUSTRIES[ent["cls"]]["cycle"])
+    k_cycle = cycle_coef(ind.ALL_INDUSTRIES[ent["cls"]]["cycle"])
     tokens_month = emission(t_fact=hours, t_norm=hours * ent["oee"] / 0.75,
                             grade=round(ent["avg_grade"]),
-                            cycle_days=ind.INDUSTRIES[ent["cls"]]["cycle"],
+                            cycle_days=ind.ALL_INDUSTRIES[ent["cls"]]["cycle"],
                             quality=ent["quality"], k_ind=k)
     tokens_rub = tokens_month * B
 
     staff = personnel_profile(ent)
     payroll = sum(r["headcount"] * r["wage_month"] for r in staff)
     revenue_month = ent["revenue_bn"] * 1e9 / 12.0
-    vds_month = revenue_month * ind.INDUSTRIES[ent["cls"]]["psi"]
+    vds_month = revenue_month * ind.ALL_INDUSTRIES[ent["cls"]]["psi"]
     surplus_month = vds_month * row["capital_share"]
     socialised = phi * surplus_month
 

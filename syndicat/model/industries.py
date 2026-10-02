@@ -38,6 +38,21 @@ INDUSTRIES = {
                wage=112000, pi=0.30, d=0.10, psi=0.38, cycle=180, hours=8.5),
 }
 
+# --- классы вне периметра 20-30, нужные территориальному контуру -----------
+# Атомный контур (раздел «Территории») включает уранодобычу и генерацию.
+# База часа для них считается той же формулой b_j = w_j + φ·ŝ_j, но в сетевую
+# единицу B они НЕ входят: курс сети задаётся только периметром 20-30.
+# Значения DEMO; генерация капиталоёмка, поэтому доля труда в её ВДС мала.
+EXTENDED = {
+    "07": dict(name="Добыча урановой и ториевой руд", short="Уранодобыча",
+               wage=92000, pi=0.40, d=0.20, psi=0.55, cycle=60, hours=1.2),
+    "35": dict(name="Производство электроэнергии атомными станциями", short="Атомная генерация",
+               wage=104000, pi=0.50, d=0.36, psi=0.62, cycle=1, hours=2.4),
+}
+
+# Полный справочник: периметр + расширение. Поиск параметров класса - только через него.
+ALL_INDUSTRIES = {**INDUSTRIES, **EXTENDED}
+
 CODES = list(INDUSTRIES.keys())
 N = len(CODES)
 INDEX = {c: i for i, c in enumerate(CODES)}
@@ -102,8 +117,8 @@ ELASTICITIES = {
 
 
 def name(code: str) -> str:
-    return INDUSTRIES[code]["name"]
+    return ALL_INDUSTRIES[code]["name"]
 
 
 def short(code: str) -> str:
-    return INDUSTRIES[code]["short"]
+    return ALL_INDUSTRIES[code]["short"]

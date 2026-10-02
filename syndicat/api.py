@@ -4,7 +4,7 @@
 import io
 from urllib.parse import parse_qs
 
-from .model import analytics, costing, enterprises, indexation, industries
+from .model import analytics, costing, enterprises, indexation, industries, territories
 from .model.constants import (ALPHA, ALPHA_HALFLIFE, BETA, BETA_HALFLIFE, D0,
                               DELTA, GAMMA, HOURS_PER_MONTH, INDEX_CAP,
                               LAMBDA, MAX_STEP, NATIONAL_WAGE_ANCHOR,
@@ -114,6 +114,11 @@ def model_params(qs):
     )
 
 
+def territories_view(qs):
+    shock = min(1.0, max(-0.9, _f(qs, "shock", 0.0)))
+    return territories.territories(_phi(qs), shock, _f(qs, "cpi", indexation.DEFAULT_CPI))
+
+
 ROUTES = {
     "/api/overview": overview,
     "/api/generation": generation,
@@ -125,6 +130,7 @@ ROUTES = {
     "/api/indexation": indexation_view,
     "/api/channel": channel,
     "/api/model": model_params,
+    "/api/territories": territories_view,
 }
 
 
@@ -149,6 +155,39 @@ def calibration_csv(qs) -> str:
                   f"{r['k_cycle']:.4f}", f"{r['external']:.4f}"]
         out.write(";".join(v.replace(".", ",") if v.replace(".", "").replace("-", "").isdigit()
                            else v for v in values) + "\n")
+    return out.getvalue()
+
+
+def territories_csv(qs) -> str:
+    """Выгрузка территориального контура: по городу - вклад в экономику и фонды."""
+    data = territories_view(qs)
+    out = io.StringIO()
+    header = ["Город", "Регион", "ЗАТО", "Население", "Предприятия группы",
+              "Численность группы", "Доля крупнейшего в занятости", "Градообразующее",
+              "ФОТ, руб./мес", "Чистые доходы работников, руб./мес",
+              "НДФЛ в бюджет города, руб./мес", "Местные закупки, руб./мес",
+              "Территориальный фонд, руб./мес", "Вклад в экономику города, руб./мес",
+              "Вклад на жителя, руб./мес", "ВДС, руб./мес", "Амортизационный фонд, руб./мес",
+              "Прибавочный продукт S, руб./мес", "Фонд phi*S, руб./мес",
+              "Фонд развития, руб./мес", "Резерв, руб./мес",
+              "Потребность индексации, руб./мес", "Покрытие индексации фондом"]
+    out.write(";".join(header) + "\n")
+
+    def num(v, d=0):
+        return f"{v:.{d}f}".replace(".", ",")
+
+    for c in data["cities"]:
+        values = [c["name"], c["region"], "да" if c["zato"] else "нет", num(c["population"]),
+                  ", ".join(e["short"] for e in c["enterprises"]), num(c["headcount"]),
+                  num(c["dependence"], 4), "да" if c["city_forming"] else "нет",
+                  num(c["payroll_month"]), num(c["income_month"]), num(c["budget_month"]),
+                  num(c["purchases_month"]), num(c["territory_fund_month"]),
+                  num(c["contribution_month"]), num(c["contribution_per_resident"]),
+                  num(c["V_month"]), num(c["D_month"]), num(c["S_month"]),
+                  num(c["socialised_month"]), num(c["development_month"]),
+                  num(c["reserve_month"]), num(c["indexation_need_month"]),
+                  num(c["coverage"], 3)]
+        out.write(";".join(values) + "\n")
     return out.getvalue()
 
 
