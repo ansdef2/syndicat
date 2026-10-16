@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from syndicat import api, linalg
 from syndicat.model import analytics, costing, enterprises, indexation, industries
-from syndicat.model import pricing, rosatom, territories, tokens
+from syndicat.model import (consortium, municipal, pmo, pmo_synth, pricing, rosatom,
+                            territories, tokens)
 from syndicat.model.constants import ALPHA, BETA, MAX_STEP, PHI
 from syndicat.model.smoothing import clip_step
 
@@ -362,6 +363,151 @@ class TestTerritories(unittest.TestCase):
         json.dumps(data, ensure_ascii=False, allow_nan=False)
         lines = api.territories_csv({}).strip().splitlines()
         self.assertEqual(len(lines), len(self.base["cities"]) + 1)
+
+
+class TestMunicipalLayer(unittest.TestCase):
+    """Муниципальный слой: панель ПМО, производственные циклы, сценарии, устойчивость."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = municipal.municipal("kurchatov")
+        cls.model = municipal._model()
+        cls.panel = cls.model["panel"]
+
+    def test_panel_is_complete_and_labelled(self):
+        cities = {cid for cid in rosatom.CITIES}
+        for (cid, key), values in self.panel.items():
+            self.assertIn(cid, cities)
+            self.assertIn(key, pmo.BY_KEY)
+            for year, (value, source) in values.items():
+                self.assertIn(year, pmo.YEARS)
+                self.assertTrue(source)
+        for cid in cities:
+            for key in pmo.BY_KEY:
+                self.assertEqual(set(self.panel[(cid, key)]), set(pmo.YEARS), (cid, key))
+
+    def test_committed_panel_matches_generator(self):
+        """data/pmo/*.csv - результат pmo_synth: перегенерация даёт те же строки."""
+        panel_rows, activity_rows = pmo_synth.generate()
+        with open(pmo.PANEL_CSV, encoding="utf-8") as fh:
+            stored = list(csv.DictReader(fh, delimiter=";"))
+        self.assertEqual(len(stored), len(panel_rows))
+        for a, b in zip(stored, panel_rows):
+            self.assertEqual([a[c] for c in pmo.PANEL_COLUMNS], [str(b[c]) for c in pmo.PANEL_COLUMNS])
+        with open(pmo.ACTIVITY_CSV, encoding="utf-8") as fh:
+            self.assertEqual(len(list(csv.DictReader(fh, delimiter=";"))), len(activity_rows))
+
+    def test_panel_budget_identities(self):
+        for cid in rosatom.CITIES:
+            for year in pmo.YEARS:
+                v = lambda key: pmo.series(self.panel, cid, key)[year]
+                self.assertEqual(v("budget_revenue"), v("tax_revenue") + v("transfers"))
+                self.assertEqual(v("budget_balance"), v("budget_revenue") - v("budget_expenditure"))
+                self.assertAlmostEqual(v("payroll"), v("employees") * v("avg_wage") * 12 / 1e3,
+                                       delta=v("payroll") * 1e-4)
+
+    def test_base_year_reproduces_panel(self):
+        """Калибровка по последнему отчётному году: модель воспроизводит панель."""
+        for cid, c in self.model["cities"].items():
+            st = c["state0"]
+            for key, scale in (("population", 1), ("employees", 1), ("payroll", 1e3),
+                               ("tax_revenue", 1e3), ("ndfl_local", 1e3), ("transfers", 1e3),
+                               ("budget_expenditure", 1e3)):
+                expected = pmo.series(self.panel, cid, key)[pmo.BASE_YEAR] * scale
+                self.assertAlmostEqual(st[key], expected, delta=abs(expected) * 1e-9, msg=(cid, key))
+
+    def test_cycle_fit_recovers_known_parameters(self):
+        hist = {y: math.exp(0.02 * (y - 2024) + 0.05 * math.cos(2 * math.pi * (y - 2024) / 3.0))
+                for y in pmo.YEARS}
+        fit = municipal.fit_activity(hist, 3.0)
+        self.assertAlmostEqual(fit["b"], 0.02, places=9)
+        self.assertAlmostEqual(fit["c"], 0.05, places=9)
+        self.assertAlmostEqual(fit["d"], 0.0, places=9)
+        self.assertLess(fit["sigma"], 1e-9)
+        # период в два года на годовом шаге: синусная составляющая вырождена и исключается
+        fit2 = municipal.fit_activity(hist, 2.0)
+        self.assertEqual(fit2["d"], 0.0)
+
+    def test_shares_are_probabilities(self):
+        for e in self.data["enterprises"]:
+            self.assertAlmostEqual(sum(e["shares"].values()), 1.0, places=12)
+            self.assertTrue(all(0 < v < 1 for v in e["shares"].values()))
+        for c in self.data["cities"]:
+            self.assertAlmostEqual(sum(c["shares"].values()), 1.0, places=12)
+
+    def test_scenarios_are_ordered(self):
+        for e in self.data["enterprises"]:
+            for year in municipal.MARKS:
+                a = {k: e["activity"][k][year] for k in ("positive", "inertial", "negative")}
+                self.assertGreaterEqual(a["positive"], a["inertial"], (e["id"], year))
+                self.assertGreaterEqual(a["inertial"], a["negative"], (e["id"], year))
+
+    def test_projected_budget_identities(self):
+        for c in self.model["cities"].values():
+            for path in c["proj"].values():
+                for st in path.values():
+                    self.assertAlmostEqual(st["budget_revenue"], st["tax_revenue"] + st["transfers"], delta=1.0)
+                    self.assertAlmostEqual(st["budget_balance"],
+                                           st["budget_revenue"] - st["budget_expenditure"], delta=1.0)
+                    self.assertGreaterEqual(st["transfers"], 0.0)
+                    self.assertAlmostEqual(st["interbudget_net"], st["transfers"] - st["region_receipts"], delta=1.0)
+
+    def test_effect_is_attributable_to_enterprises(self):
+        cities = {c["id"]: c for c in self.data["cities"]}
+        for cid in ("spb", "novosibirsk"):           # доля группы в занятости - доли процента
+            for k in ("positive", "inertial", "negative"):
+                self.assertLess(abs(cities[cid]["horizon"][k][2036]["effect"]), 0.005, (cid, k))
+        for cid in ("udomlya", "desnogorsk", "polyarnye_zori", "novovoronezh"):
+            h = cities[cid]["horizon"]
+            self.assertLess(h["negative"][2036]["effect"], h["inertial"][2036]["effect"])
+            self.assertLess(h["inertial"][2036]["effect"], h["positive"][2036]["effect"])
+        for cid in ("polyarnye_zori", "desnogorsk"):   # самые зависимые моногорода
+            self.assertEqual(cities[cid]["horizon"]["negative"][2036]["effect_class"], "negative", cid)
+            self.assertEqual(cities[cid]["horizon"]["positive"][2036]["effect_class"], "positive", cid)
+
+    def test_resilience_and_grid_weight(self):
+        ents = self.data["enterprises"]
+        for e in ents:
+            self.assertTrue(0 < e["resilience"] <= 1)
+            expected = ("устойчивое" if e["resilience"] >= municipal.RESILIENT else
+                        "умеренное" if e["resilience"] >= municipal.MODERATE else "уязвимое")
+            self.assertEqual(e["resilience_class"], expected)
+            self.assertGreater(e["weight"], 0)
+        self.assertAlmostEqual(max(e["weight_norm"] for e in ents), 1.0)
+        by_id = {e["id"]: e for e in ents}
+        # предприятие с малой маржой уязвимее станции с регулируемой выручкой
+        self.assertLess(by_id["mayak"]["resilience"], by_id["kalinin"]["resilience"])
+
+    def test_real_data_overrides_synthetic(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            real = os.path.join(tmp, "real.csv")
+            pmo.write_panel([dict(municipality="udomlya", oktmo="", indicator="population",
+                                  year=2024, value=27500, unit="чел.", source="ПМО")], real)
+            saved = pmo.REAL_CSV
+            pmo.REAL_CSV = real
+            try:
+                panel = pmo.load_panel()
+            finally:
+                pmo.REAL_CSV = saved
+        self.assertEqual(panel[("udomlya", "population")][2024], (27500.0, "ПМО"))
+        self.assertEqual(pmo.provenance(panel)["ПМО"], 1)
+
+    def test_consortium_levers_map_to_drivers(self):
+        drivers = {d["key"] for d in consortium.DRIVERS}
+        for r in consortium.REGULATORS:
+            self.assertIn(r["driver"], drivers)
+        self.assertGreaterEqual(len(consortium.NORMS), 10)
+
+    def test_api_and_exports(self):
+        data, error = api.dispatch("/api/municipal", "city=udomlya")
+        self.assertIsNone(error)
+        json.dumps(data, ensure_ascii=False, allow_nan=False)
+        self.assertEqual(data["city"]["id"], "udomlya")
+        lines = api.municipal_csv({}).strip().splitlines()
+        self.assertEqual(len(lines), 1 + len(data["cities"]) * 3 * len(municipal.MARKS))
+        panel_lines = api.pmo_panel_csv({}).strip().splitlines()
+        self.assertEqual(len(panel_lines), 1 + sum(len(v) for v in self.panel.values()))
 
 
 if __name__ == "__main__":

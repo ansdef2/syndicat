@@ -4,7 +4,8 @@
 import io
 from urllib.parse import parse_qs
 
-from .model import analytics, costing, enterprises, indexation, industries, territories
+from .model import (analytics, costing, enterprises, indexation, industries, municipal,
+                    pmo, territories)
 from .model.constants import (ALPHA, ALPHA_HALFLIFE, BETA, BETA_HALFLIFE, D0,
                               DELTA, GAMMA, HOURS_PER_MONTH, INDEX_CAP,
                               LAMBDA, MAX_STEP, NATIONAL_WAGE_ANCHOR,
@@ -119,6 +120,10 @@ def territories_view(qs):
     return territories.territories(_phi(qs), shock, _f(qs, "cpi", indexation.DEFAULT_CPI))
 
 
+def municipal_view(qs):
+    return municipal.municipal(_s(qs, "city", ""))
+
+
 ROUTES = {
     "/api/overview": overview,
     "/api/generation": generation,
@@ -131,6 +136,7 @@ ROUTES = {
     "/api/channel": channel,
     "/api/model": model_params,
     "/api/territories": territories_view,
+    "/api/municipal": municipal_view,
 }
 
 
@@ -188,6 +194,51 @@ def territories_csv(qs) -> str:
                   num(c["reserve_month"]), num(c["indexation_need_month"]),
                   num(c["coverage"], 3)]
         out.write(";".join(values) + "\n")
+    return out.getvalue()
+
+
+def pmo_panel_csv(qs) -> str:
+    """Панель ПМО в том виде, в каком её читает модель: с источником каждого значения."""
+    panel = pmo.load_panel()
+    out = io.StringIO()
+    out.write(";".join(pmo.PANEL_COLUMNS + ["name"]) + "\n")
+    for (city, key), values in sorted(panel.items()):
+        for year, (value, source) in sorted(values.items()):
+            out.write(";".join([city, "", key, str(year), f"{value:g}".replace(".", ","),
+                                pmo.BY_KEY[key]["unit"], source, pmo.BY_KEY[key]["name"]]) + "\n")
+    return out.getvalue()
+
+
+def municipal_csv(qs) -> str:
+    """Сценарии по городам: эффект предприятий и ключевые показатели на 2030 и 2036 годы."""
+    data = municipal.municipal()
+    out = io.StringIO()
+    header = ["Город", "Регион", "ЗАТО", "Предприятия", "Доля крупнейшего в занятости",
+              "Зависимость бюджета от трансфертов", "Доля предприятий в собственных доходах",
+              "Устойчивость", "Сценарий", "Доля сценария", "Год", "Эффект предприятий, %",
+              "Класс эффекта", "Население", "Занятость", "ФОТ, тыс. руб.",
+              "Собственные доходы бюджета, тыс. руб.", "Трансферты, тыс. руб.",
+              "Сальдо бюджета, тыс. руб.", "Межбюджетное сальдо, тыс. руб.", "Выбросы, т"]
+    out.write(";".join(header) + "\n")
+    names = {"positive": "позитивный", "inertial": "инерционный", "negative": "негативный"}
+
+    def num(v, d=0):
+        return f"{v:.{d}f}".replace(".", ",")
+
+    for c in data["cities"]:
+        for key, label in names.items():
+            for year in data["marks"]:
+                h = c["horizon"][key][year]
+                out.write(";".join([
+                    c["name"], c["region"], "да" if c["zato"] else "нет",
+                    ", ".join(e["short"] for e in c["enterprises"]),
+                    num(c["dependence"], 4), num(c["transfer_dependence"], 4),
+                    num(c["ent_own_share"], 4), num(c["resilience"], 3), label,
+                    num(c["shares"][key], 3), str(year), num(h["effect"] * 100, 2),
+                    names[h["effect_class"]], num(h["population"]), num(h["employees"]),
+                    num(h["payroll"] / 1e3), num(h["tax_revenue"] / 1e3),
+                    num(h["transfers"] / 1e3), num(h["budget_balance"] / 1e3),
+                    num(h["interbudget_net"] / 1e3), num(h["emissions"], 1)]) + "\n")
     return out.getvalue()
 
 
