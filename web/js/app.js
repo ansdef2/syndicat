@@ -17,6 +17,9 @@ const state = {
   zeta: 0.5,
   shock: 0,
   city: "",
+  indicator: "effect",
+  horizon: 2036,
+  layer: null,          // null - по умолчанию раздела: в «Муниципалитетах» слой включён
   factors: { energy: 0.12, fx: 0.08, rate: 0, logistics: 0, raw: 0 },
 };
 
@@ -29,6 +32,7 @@ const VIEWS = {
   enterprises: { title: "Реестр предприятий", sub: "средние и крупные субъекты периметра 20-30" },
   indexation: { title: "Индексация заработной платы", sub: "локальный корпоративный контур" },
   territories: { title: "Территории · Росатом", sub: "сетка предприятий группы, вклад в экономику городов, фонды" },
+  municipal: { title: "Муниципальный слой · ПМО", sub: "консорциум, производственные циклы и бюджеты моногородов, сценарии до 2036 года" },
   model: { title: "Модель и параметры", sub: "шесть слоёв, уставные величины, границы применимости" },
 };
 
@@ -59,7 +63,8 @@ const actions = {
 
 function syncHash() {
   const short = { view: state.view, phi: state.phi, ent: state.ent, code: state.code,
-    city: state.city, shock: state.shock || undefined };
+    city: state.city, shock: state.shock || undefined, indicator: state.indicator,
+    horizon: state.horizon, layer: state.layer === null ? undefined : state.layer };
   location.hash = qs(short);
 }
 
@@ -73,6 +78,9 @@ function readHash() {
   if (params.get("code")) state.code = params.get("code");
   if (params.get("city")) state.city = params.get("city");
   if (params.get("shock")) state.shock = parseFloat(params.get("shock")) || 0;
+  if (params.get("indicator")) state.indicator = params.get("indicator");
+  if (params.get("horizon")) state.horizon = parseInt(params.get("horizon"), 10);
+  if (params.get("layer")) state.layer = params.get("layer") === "true";
 }
 
 async function render() {
@@ -121,10 +129,19 @@ async function render() {
         V.indexation(node, data, state, actions);
         break;
       }
-      case "territories":
-        V.territories(node, await api("/api/territories",
-          { phi: state.phi, shock: state.shock, cpi: state.cpi }), state, actions);
+      case "territories": {
+        const data = await api("/api/territories", { phi: state.phi, shock: state.shock, cpi: state.cpi });
+        const layer = state.layer === true ? await api("/api/municipal", { city: state.city }) : null;
+        V.territories(node, data, state, actions, layer);
         break;
+      }
+      case "municipal": {
+        const data = await api("/api/municipal", { city: state.city });
+        state.city = data.city.id;
+        const grid = await api("/api/territories", { phi: state.phi });
+        V.municipal(node, data, state, actions, grid);
+        break;
+      }
       case "model":
         V.model(node, await api("/api/model", {}), state, actions);
         break;

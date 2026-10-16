@@ -75,7 +75,9 @@ class SyndicatHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
 
         exports = {"/api/export/calibration.csv": (api.calibration_csv, "syndicat-calibration.csv"),
-                   "/api/export/territories.csv": (api.territories_csv, "syndicat-territories.csv")}
+                   "/api/export/territories.csv": (api.territories_csv, "syndicat-territories.csv"),
+                   "/api/export/pmo-panel.csv": (api.pmo_panel_csv, "syndicat-pmo-panel.csv"),
+                   "/api/export/municipal.csv": (api.municipal_csv, "syndicat-municipal.csv")}
         if path in exports:
             from urllib.parse import parse_qs
             build, filename = exports[path]

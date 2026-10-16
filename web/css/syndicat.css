@@ -280,6 +280,20 @@ select:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-v
 .chip[aria-pressed="true"]{background:var(--kumach);border-color:var(--kumach);color:var(--luch)}
 .filters{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px}
 .filters .f{display:flex;flex-direction:column;gap:5px}
+/* муниципальный слой: схема консорциума и переключатель слоя */
+.cons{display:flex;flex-direction:column;gap:10px}
+.cons-label{display:block;margin-bottom:6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--latun)}
+.cons-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+.cons-box{border:1px solid var(--hair);background:var(--tush-3);padding:10px 12px;font-size:12.5px}
+.cons-box b{display:block;color:var(--grunt);font-weight:600}
+.cons-box i{display:block;font-style:normal;color:var(--ink-3);margin-top:4px}
+.cons-box em{display:inline-block;margin-top:8px;font-style:normal;font-size:11px;color:var(--luch);
+  border:1px solid var(--hair);padding:1px 6px}
+.cons-box.lead{border-color:var(--kumach);background:rgba(142,27,20,.18)}
+.cons-arrow{font-size:12px;color:var(--ink-3);text-align:center;letter-spacing:.03em}
+.switch{display:inline-flex;gap:8px;align-items:center;font-size:12.5px;color:var(--ink-2);cursor:pointer;padding:6px 0}
+.switch input{accent-color:var(--kumach)}
+.scen-notes{margin-top:14px;display:flex;flex-direction:column;gap:8px}
 .filters .f span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--latun)}
 .loading{padding:40px;text-align:center;color:var(--ink-3);font-size:13px}
 

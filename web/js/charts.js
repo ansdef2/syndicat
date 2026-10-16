@@ -441,19 +441,21 @@ export function meter(host, opt) {
    ------------------------------------------------------------------------ */
 export function flowGrid(host, opt) {
   const W = 1000, colW = 132, rowH = 30, top = 34, gap = (W - colW) / (opt.stages.length - 1);
-  const byStage = opt.stages.map((_, i) => opt.nodes
-    .filter((n) => n.stage === i + 1)
-    .sort((a, b) => opt.order[a.division] - opt.order[b.division] || b.output - a.output));
-  const H = top + Math.max(...byStage.map((c) => c.length)) * rowH + 8;
+  const nodeH = (n) => (opt.nodeHeight ? opt.nodeHeight(n) : rowH - 6);
+  const order = opt.sort || ((a, b) => opt.order[a.division] - opt.order[b.division] || b.output - a.output);
+  const byStage = opt.stages.map((_, i) => opt.nodes.filter((n) => n.stage === i + 1).sort(order));
+  const colHeight = (col) => col.reduce((acc, n) => acc + nodeH(n) + 6, 0);
+  const H = top + Math.max(...byStage.map(colHeight)) + 8;
   const { svg, tip } = frame(host, W, H);
   svg.setAttribute("aria-label", opt.title || "Сетка внутригрупповых поставок");
 
   const pos = {};
   byStage.forEach((col, i) => {
-    const x = i * gap, offset = (H - top - col.length * rowH) / 2;
+    const x = i * gap;
+    let y = top + (H - top - colHeight(col)) / 2;
     svg.appendChild(s("text", { x: x + colW / 2, y: 14, "text-anchor": "middle", class: "lbl",
       fill: "var(--latun)", "font-size": 10.5 }, opt.stages[i]));
-    col.forEach((n, j) => { pos[n.id] = { x, y: top + offset + j * rowH, n }; });
+    col.forEach((n) => { const h = nodeH(n); pos[n.id] = { x, y, h, n }; y += h + 6; });
   });
 
   const agg = {};
@@ -468,7 +470,7 @@ export function flowGrid(host, opt) {
   edges.sort((a, b) => b.value - a.value).forEach((e) => {
     const a = pos[e.source], b = pos[e.target];
     if (!a || !b) return;
-    const x1 = a.x + colW, y1 = a.y + rowH / 2 - 2, x2 = b.x, y2 = b.y + rowH / 2 - 2;
+    const x1 = a.x + colW, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2;
     const mx = (x1 + x2) / 2;
     const path = s("path", { d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`,
       fill: "none", stroke: opt.color(a.n.division), "stroke-opacity": 0.5,
@@ -483,13 +485,22 @@ export function flowGrid(host, opt) {
     path.addEventListener("mouseleave", () => hideTip(tip));
   });
 
-  Object.values(pos).forEach(({ x, y, n }) => {
+  Object.values(pos).forEach(({ x, y, h, n }) => {
     const g = s("g", { class: "mark-hit" });
-    g.appendChild(s("rect", { x, y, width: colW, height: rowH - 6, fill: "var(--tush-3)",
-      stroke: "var(--hair)" }));
-    g.appendChild(s("rect", { x, y, width: 4, height: rowH - 6, fill: opt.color(n.division) }));
-    g.appendChild(s("text", { x: x + 10, y: y + 16, class: "lbl", fill: n.focus ? "var(--luch)" : "var(--grunt)",
-      "font-size": 11 }, n.short));
+    g.appendChild(s("rect", { x, y, width: colW, height: h, fill: "var(--tush-3)",
+      stroke: n.focus ? "var(--luch)" : "var(--hair)" }));
+    g.appendChild(s("rect", { x, y, width: opt.stripe ? 6 : 4, height: h,
+      fill: opt.stripe ? opt.stripe(n) : opt.color(n.division) }));
+    g.appendChild(s("text", { x: x + 12, y: y + Math.min(16, h / 2 + 4), class: "lbl",
+      fill: n.focus ? "var(--luch)" : "var(--grunt)", "font-size": 11 }, n.short));
+    if (opt.shares && h >= 26) {          // доли сценариев: позитивный / инерционный / негативный
+      let sx = x + 12;
+      const bw = colW - 20;
+      opt.shares(n).forEach(([v, color]) => {
+        g.appendChild(s("rect", { x: sx, y: y + h - 8, width: bw * v, height: 4, fill: color }));
+        sx += bw * v;
+      });
+    }
     g.addEventListener("mousemove", (evt) => showTip(host, tip, evt, n.short, opt.nodeTip(n)));
     g.addEventListener("mouseleave", () => hideTip(tip));
     if (opt.onPick) g.addEventListener("click", () => opt.onPick(n));
@@ -529,5 +540,117 @@ export function stackedH(host, opt) {
     svg.appendChild(s("text", { x: x + 10, y: y + 14, class: "val" }, opt.format(total(r))));
   });
   legend(host, opt.keys.map((k) => ({ color: k.color, label: k.label })));
+  return svg;
+}
+
+/* --------------------------------------------------------------------------
+   Сценарии: отчётные годы - сплошная линия, проекция - три сценария
+   и ожидаемая траектория (взвешенная долями), отметки горизонтов.
+   ------------------------------------------------------------------------ */
+export function scenarioChart(host, opt) {
+  const W = 1000, H = opt.height || 330, padL = 74, padR = 120, padT = 18, padB = 34;
+  const { svg, tip } = frame(host, W, H);
+  svg.setAttribute("aria-label", opt.title || "Сценарии до горизонта прогноза");
+  const years = [...opt.histYears, ...opt.projYears];
+  const all = [...Object.values(opt.history), ...opt.series.flatMap((sr) => Object.values(sr.values))]
+    .filter((v) => Number.isFinite(v));
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (opt.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.1 || 1;
+  lo -= pad; hi += pad;
+  const x = (yr) => padL + ((yr - years[0]) / (years[years.length - 1] - years[0])) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+
+  // проекция - заливка фона
+  svg.appendChild(s("rect", { x: x(opt.baseYear), y: padT, width: x(years[years.length - 1]) - x(opt.baseYear),
+    height: H - padT - padB, fill: "var(--hair-2)" }));
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + ((hi - lo) * i) / 4;
+    svg.appendChild(s("line", { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: "var(--hair-2)" }));
+    svg.appendChild(s("text", { x: padL - 8, y: y(v) + 4, "text-anchor": "end", class: "lbl",
+      "font-size": 10.5 }, opt.format(v)));
+  }
+  if (opt.zero) svg.appendChild(s("line", { x1: padL, x2: W - padR, y1: y(0), y2: y(0),
+    stroke: "var(--ink-3)", "stroke-dasharray": "2 3" }));
+  years.filter((yr) => yr % 2 === 0 || yr === years[0]).forEach((yr) =>
+    svg.appendChild(s("text", { x: x(yr), y: H - 12, "text-anchor": "middle", class: "lbl",
+      "font-size": 10.5 }, String(yr))));
+  (opt.marks || []).forEach((m) => {
+    svg.appendChild(s("line", { x1: x(m), x2: x(m), y1: padT, y2: H - padB, stroke: "var(--latun)",
+      "stroke-dasharray": "4 4" }));
+  });
+
+  const path = (pts) => pts.map(([a, b], i) => `${i ? "L" : "M"}${x(a)} ${y(b)}`).join(" ");
+  const histPts = opt.histYears.filter((yr) => Number.isFinite(opt.history[yr])).map((yr) => [yr, opt.history[yr]]);
+  const last = histPts[histPts.length - 1];
+  opt.series.forEach((sr) => {
+    const pts = [last, ...opt.projYears.map((yr) => [yr, sr.values[yr]])];
+    svg.appendChild(s("path", { d: path(pts), fill: "none", stroke: sr.color,
+      "stroke-width": sr.width || 2, "stroke-dasharray": sr.dash || "none" }));
+    const end = pts[pts.length - 1];
+    svg.appendChild(s("text", { x: x(end[0]) + 8, y: y(end[1]) + 4, class: "val", fill: sr.color,
+      "font-size": 11 }, opt.format(end[1])));
+  });
+  svg.appendChild(s("path", { d: path(histPts), fill: "none", stroke: "var(--grunt)", "stroke-width": 2.4 }));
+  histPts.forEach(([a, b]) => svg.appendChild(s("circle", { cx: x(a), cy: y(b), r: 3,
+    fill: opt.sourceColor ? opt.sourceColor(a) : "var(--grunt)" })));
+
+  // наведение: значения по году
+  years.forEach((yr) => {
+    const hit = s("rect", { x: x(yr) - 18, y: padT, width: 36, height: H - padT - padB,
+      fill: "transparent", class: "mark-hit" });
+    svg.appendChild(hit);
+    hit.addEventListener("mousemove", (evt) => {
+      const rows = yr <= opt.baseYear
+        ? [["отчётный год", opt.format(opt.history[yr])], ...(opt.sourceOf ? [["источник", opt.sourceOf(yr)]] : [])]
+        : opt.series.map((sr) => [sr.label, opt.format(sr.values[yr])]);
+      showTip(host, tip, evt, String(yr), rows);
+    });
+    hit.addEventListener("mouseleave", () => hideTip(tip));
+  });
+  legend(host, [{ color: "var(--grunt)", label: "отчётные годы", line: true },
+    ...opt.series.map((sr) => ({ color: sr.color, label: sr.label, line: true }))]);
+  return svg;
+}
+
+/* --------------------------------------------------------------------------
+   Диапазон сценариев по строкам: негативный, инерционный и позитивный
+   исход на одной оси, ромб - ожидаемое значение по долям сценариев.
+   ------------------------------------------------------------------------ */
+export function rangeDots(host, opt) {
+  const rows = opt.rows, rowH = 26, padL = opt.padL || 170, padR = 70, W = 1000;
+  const H = rows.length * rowH + 30;
+  const { svg, tip } = frame(host, W, H);
+  svg.setAttribute("aria-label", opt.title || "Диапазон сценариев");
+  const vals = rows.flatMap((r) => opt.keys.map((k) => opt.value(r, k.key)));
+  const lim = Math.max(Math.abs(Math.min(...vals, 0)), Math.abs(Math.max(...vals, 0))) * 1.1 || 1;
+  const x = (v) => padL + ((v + lim) / (2 * lim)) * (W - padL - padR);
+  svg.appendChild(s("line", { x1: x(0), x2: x(0), y1: 4, y2: H - 22, stroke: "var(--ink-3)", "stroke-dasharray": "2 3" }));
+  [-lim, -lim / 2, 0, lim / 2, lim].forEach((v) => svg.appendChild(s("text", { x: x(v), y: H - 6,
+    "text-anchor": "middle", class: "lbl", "font-size": 10.5 }, opt.format(v))));
+  rows.forEach((r, i) => {
+    const cy = i * rowH + 16;
+    svg.appendChild(s("text", { x: padL - 12, y: cy + 4, "text-anchor": "end", class: "lbl",
+      fill: r.focus ? "var(--luch)" : "var(--ink-2)" }, opt.label(r)));
+    const xs = opt.keys.map((k) => x(opt.value(r, k.key)));
+    svg.appendChild(s("line", { x1: Math.min(...xs), x2: Math.max(...xs), y1: cy, y2: cy,
+      stroke: "var(--hair)", "stroke-width": 3 }));
+    opt.keys.forEach((k, j) => svg.appendChild(s("circle", { cx: xs[j], cy, r: 5, fill: k.color })));
+    if (opt.expected) {
+      const ex = x(opt.expected(r));
+      svg.appendChild(s("rect", { x: ex - 4, y: cy - 4, width: 8, height: 8, fill: "var(--luch)",
+        transform: `rotate(45 ${ex} ${cy})` }));
+    }
+    const hit = s("rect", { x: 0, y: cy - rowH / 2, width: W, height: rowH, fill: "transparent", class: "mark-hit" });
+    svg.appendChild(hit);
+    hit.addEventListener("mousemove", (evt) => showTip(host, tip, evt, opt.label(r),
+      [...opt.keys.map((k) => [k.label, opt.format(opt.value(r, k.key))]),
+       ...(opt.expected ? [["ожидаемое по долям", opt.format(opt.expected(r))]] : []),
+       ...(opt.tip ? opt.tip(r) : [])]));
+    hit.addEventListener("mouseleave", () => hideTip(tip));
+    if (opt.onPick) hit.addEventListener("click", () => opt.onPick(r));
+  });
+  legend(host, [...opt.keys.map((k) => ({ color: k.color, label: k.label })),
+    ...(opt.expected ? [{ color: "var(--luch)", label: "ожидаемое по долям сценариев" }] : [])]);
   return svg;
 }

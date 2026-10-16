@@ -952,7 +952,7 @@ const DIV_COLOR = { mining: "var(--ser-3)", fuel: "var(--ser-2)", radiochem: "#7
   machine: "var(--ser-1)", power: "var(--luch)" };
 const bn = (v) => nf(v / 1e9, 1);
 
-export function territories(root, d, state, actions) {
+export function territories(root, d, state, actions, layer) {
   const t = d.totals, p = d.params;
   const city = d.cities.find((c) => c.id === state.city) || d.cities.find((c) => c.city_forming) || d.cities[0];
   const divOrder = Object.fromEntries(d.divisions_meta.map((x, i) => [x.key, i]));
@@ -989,10 +989,15 @@ export function territories(root, d, state, actions) {
       </section>
 
       <section class="card span-12">
-        <h3>Сетка группы: внутригрупповые поставки</h3>
+        <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+          <h3>Сетка группы: внутригрупповые поставки</h3>
+          <div style="flex:1"></div>
+          ${layerSwitch(Boolean(layer))}
+        </div>
         <p class="cap">Колонки - стадии цепочки, толщина связи - объём за год. Сплошная линия -
           промежуточное потребление (входит в матрицу A группы и в полные трудозатраты),
-          пунктир - оборудование в основные фонды получателя. Наведите на узел или связь.</p>
+          пунктир - оборудование в основные фонды получателя. Наведите на узел или связь.
+          ${layer ? LAYER_CAPTION : ""}</p>
         <div class="chart" id="grid-flow"></div>
       </section>
 
@@ -1068,19 +1073,8 @@ export function territories(root, d, state, actions) {
   q(root, "#cpi").addEventListener("change", () => actions.set({ cpi: num("#cpi", 100) ?? 0.074 }));
   q(root, "#city").addEventListener("change", (e) => actions.set({ city: e.target.value }));
 
-  const rowsById = Object.fromEntries(d.rows.map((r) => [r.id, r]));
-  C.flowGrid(q(root, "#grid-flow"), {
-    nodes: d.nodes.map((n) => ({ ...n, focus: n.city === city.name })), flows: d.flows,
-    stages: ["Добыча", "Конверсия", "Обогащение, цирконий", "Топливо, радиохимия, оборудование", "Атомные станции"],
-    order: divOrder, color: (div) => DIV_COLOR[div], format: (v) => bn(v) + " млрд ₽",
-    nodeTip: (n) => {
-      const r = rowsById[n.id];
-      return [["город", r.city], ["дивизион", r.division_name], ["выпуск", bn(r.output) + " млрд ₽/год"],
-        ["на внешний рынок", pct0(r.conversion, 1)], ["рента", pct(r.rent, 1)]];
-    },
-    onPick: (n) => actions.set({ city: rowsById[n.id].city_id }),
-  });
-  C.legend(q(root, "#grid-flow"), d.divisions_meta.map((x) => ({ color: DIV_COLOR[x.key], label: x.short })));
+  drawGrid(q(root, "#grid-flow"), d, city.name, actions, layer);
+  bindLayerSwitch(root, actions);
 
   table(q(root, "#div-table"), d.divisions.map((x) => ({ ...x, id: x.key })), [
     { k: "short", t: "Дивизион", f: (r) => `<span class="name">${r.short}<i>${r.enterprises} предпр. · ${nf(r.headcount, 0)} чел.</i></span>` },
@@ -1231,4 +1225,337 @@ function cityCard(node, c, rows, d) {
     format: (v) => compact(v, " ₽"), tipTitle: (r) => r.label,
     tip: (r) => [["в месяц", compact(r.value, " ₽")], ["доля ВДС", pct0(c.V_month ? r.value / c.V_month : 0, 1)]],
   });
+}
+
+/* ------------------------------------------- муниципальный слой (ПМО) */
+const SC_COLOR = { positive: "var(--ser-3)", inertial: "var(--ser-2)", negative: "var(--ser-1)" };
+const SC_NAME = { positive: "позитивный", inertial: "инерционный", negative: "негативный" };
+const RES_COLOR = { "устойчивое": "var(--ser-3)", "умеренное": "var(--ser-2)", "уязвимое": "var(--ser-1)" };
+const STAGES = ["Добыча", "Конверсия", "Обогащение, цирконий", "Топливо, радиохимия, оборудование", "Атомные станции"];
+const LAYER_CAPTION = `<b>Муниципальный слой включён:</b> высота узла - вес предприятия для своего
+  города (доля в занятости и в собственных доходах бюджета, умноженная на ожидаемую активность
+  2030 года), порядок в колонке - устойчивость сверху вниз, полоса слева - класс устойчивости,
+  полоска внизу узла - доли позитивного, инерционного и негативного сценариев по отчётным годам.`;
+
+function layerSwitch(on) {
+  return `<label class="switch"><input type="checkbox" id="layer-switch" ${on ? "checked" : ""}>
+    муниципальный слой (ПМО)</label>`;
+}
+
+function bindLayerSwitch(root, actions) {
+  const sw = root.querySelector("#layer-switch");
+  if (sw) sw.addEventListener("change", (e) => actions.set({ layer: e.target.checked }));
+}
+
+/* Отраслевая сетка; с муниципальным слоем узлы получают вес, место и класс устойчивости. */
+function drawGrid(host, t, focusCity, actions, layer) {
+  const byId = Object.fromEntries(t.rows.map((r) => [r.id, r]));
+  const lay = layer ? Object.fromEntries(layer.enterprises.map((e) => [e.id, e])) : null;
+  const divOrder = Object.fromEntries(t.divisions_meta.map((x, i) => [x.key, i]));
+  C.flowGrid(host, {
+    nodes: t.nodes.map((n) => ({ ...n, focus: n.city === focusCity })), flows: t.flows,
+    stages: STAGES, order: divOrder, color: (div) => DIV_COLOR[div], format: (v) => bn(v) + " млрд ₽",
+    ...(lay ? {
+      nodeHeight: (n) => 24 + 34 * Math.sqrt(lay[n.id].weight_norm),
+      sort: (a, b) => lay[b.id].resilience - lay[a.id].resilience,
+      stripe: (n) => RES_COLOR[lay[n.id].resilience_class],
+      shares: (n) => ["positive", "inertial", "negative"].map((k) => [lay[n.id].shares[k], SC_COLOR[k]]),
+    } : {}),
+    nodeTip: (n) => {
+      const r = byId[n.id];
+      const base = [["город", r.city], ["дивизион", r.division_name], ["выпуск", bn(r.output) + " млрд ₽/год"],
+        ["на внешний рынок", pct0(r.conversion, 1)], ["рента", pct(r.rent, 1)]];
+      if (!lay) return base;
+      const e = lay[n.id];
+      return [...base, ["устойчивость", `${nf(e.resilience, 2)} · ${e.resilience_class}`],
+        ["вес для города", nf(e.weight, 3)],
+        ["доли сценариев", ["positive", "inertial", "negative"].map((k) => pct0(e.shares[k], 0)).join(" / ")],
+        ["просадка к 2030", pct0(e.downside, 1)]];
+    },
+    onPick: (n) => actions.set({ city: byId[n.id].city_id }),
+  });
+  C.legend(host, lay
+    ? [...Object.entries(RES_COLOR).map(([k, c]) => ({ color: c, label: k })),
+       ...Object.entries(SC_COLOR).map(([k, c]) => ({ color: c, label: `доля: ${SC_NAME[k]}` }))]
+    : t.divisions_meta.map((x) => ({ color: DIV_COLOR[x.key], label: x.short })));
+}
+
+function unitFormat(unit) {
+  if (unit === "тыс. руб.") return (v) => compact(v * 1e3, " ₽");
+  if (unit === "%") return (v) => nf(v, 1) + "%";
+  if (unit === "руб.") return (v) => nf(v, 0) + " ₽";
+  return (v) => nf(v, 0) + " " + unit;
+}
+
+export function municipal(root, d, state, actions, t) {
+  const c = d.city;
+  const meta = Object.fromEntries(d.catalog.map((x) => [x.key, x]));
+  const ind = meta[state.indicator] ? state.indicator : "effect";
+  const im = meta[ind], fmt = unitFormat(im.unit);
+  const H = d.marks.includes(Number(state.horizon)) ? Number(state.horizon) : d.marks[d.marks.length - 1];
+  const cityRow = d.cities.find((x) => x.id === c.id);
+  const ser = c.series[ind];
+  const layerOn = state.layer !== false;
+  const sections = [...new Set(d.catalog.map((x) => x.section))];
+  const totals = d.cities.reduce((acc, x) => ({
+    own: acc.own + x.base.tax_revenue, transfers: acc.transfers + x.base.transfers,
+    net: acc.net + x.base.interbudget_net }), { own: 0, transfers: 0, net: 0 });
+  const prov = Object.entries(d.provenance).map(([k, v]) => `${k}: ${nf(v, 0)}`).join(" · ");
+  const driverName = Object.fromEntries(d.consortium.drivers.map((x) => [x.key, x.name]));
+
+  root.innerHTML = `
+    <div class="filters">
+      <div class="f"><span>муниципалитет</span>
+        <select id="m-city">${d.cities.map((x) => `<option value="${x.id}" ${x.id === c.id ? "selected" : ""}>${x.name}${x.dependence >= 0.2 ? " · градообразующее" : ""}</option>`).join("")}</select></div>
+      <div class="f"><span>показатель</span>
+        <select id="m-ind">${sections.map((sec) => `<optgroup label="${sec}">${d.catalog.filter((x) => x.section === sec).map((x) =>
+          `<option value="${x.key}" ${x.key === ind ? "selected" : ""}>${x.name}</option>`).join("")}</optgroup>`).join("")}</select></div>
+      <div class="f"><span>горизонт</span>
+        <div class="chips" style="margin:0">${d.marks.map((m) => `<button class="chip" data-h="${m}" aria-pressed="${m === H}">${m}</button>`).join("")}</div></div>
+      <div class="f"><span>отраслевая сетка</span>${layerSwitch(layerOn)}</div>
+      <a class="btn ghost" href="/api/export/municipal.csv">CSV сценариев</a>
+      <a class="btn ghost" href="/api/export/pmo-panel.csv">CSV панели ПМО</a>
+    </div>
+    <div class="grid">
+      <section class="card span-12">
+        <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+          <span class="tag"><em>консорциум</em></span>
+          <h3>Экосистема «Росатома» как консорциум - основа муниципального слоя</h3>
+        </div>
+        <p class="cap">Правовая форма - договор о совместной деятельности: участники вносят вклады,
+          лидер ведёт общие дела, результат делится по уставным долям. Решения регуляторов - драйверы
+          сценариев; территории связаны с консорциумом налогами, доходами работников, закупками
+          и территориальным фондом, а с субъектами РФ - межбюджетными трансфертами.</p>
+        <div class="cons">
+          <div><span class="cons-label">Регуляторы · драйверы сценариев</span>
+            <div class="cons-row">${d.consortium.regulators.map((r) => `<div class="cons-box"><b>${r.name}</b>
+              <i>${r.lever}</i><em>${driverName[r.driver]}</em></div>`).join("")}</div></div>
+          <div class="cons-arrow">решения ведомств ↓ драйверы сценариев: рынок, внутренний спрос, отраслевая, бюджетная и экологическая политика</div>
+          <div><span class="cons-label">Ядро консорциума</span>
+            <div class="cons-row"><div class="cons-box lead"><b>${d.consortium.leader.name}</b>
+              <i>${d.consortium.leader.duties.join("; ")}</i><em>${d.consortium.leader.role}</em></div>
+              ${d.consortium.operators.map((o) => `<div class="cons-box"><b>${o.name}</b><i>${o.role}</i></div>`).join("")}</div></div>
+          <div class="cons-arrow">↓ ФОТ, НДФЛ, земельный налог, плата за НВОС, местные закупки, территориальный фонд · ↑ трансферты субъекта</div>
+          <div><span class="cons-label">Территории · базовый ${d.base_year} год</span>
+            <div class="cons-row">
+              <div class="cons-box"><b>${d.cities.length} городских округов</b><i>${d.cities.filter((x) => x.zato).length} ЗАТО ·
+                ${d.cities.filter((x) => x.dependence >= 0.2).length} с градообразующим предприятием</i></div>
+              <div class="cons-box"><b>${compact(totals.own * 1, " ₽")}</b><i>собственные доходы бюджетов в год</i></div>
+              <div class="cons-box"><b>${compact(totals.transfers, " ₽")}</b><i>трансферты из бюджетов субъектов в год</i></div>
+              <div class="cons-box"><b>${compact(totals.net, " ₽")}</b><i>сальдо межбюджетных отношений: трансферты минус
+                поступления с территорий в субъекты</i></div>
+            </div></div>
+        </div>
+      </section>
+
+      <section class="card span-12">
+        <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+          <span class="tag${cityRow.dependence >= 0.2 ? "" : " quiet"}"><em>${cityRow.dependence >= 0.2 ? "моногород" : "присутствие группы"}</em></span>
+          <h3>${c.name}${cityRow.zato ? " · ЗАТО" : ""}</h3>
+          <span class="note">${cityRow.region} · ${cityRow.enterprises.map((e) => e.short).join(", ")}</span>
+        </div>
+        <div class="tiles" style="margin-top:16px">
+          ${tile(pct0(cityRow.dependence, 1), "доля крупнейшего предприятия в занятости", "порог моногорода 20%", cityRow.dependence >= 0.2)}
+          ${tile(pct0(cityRow.ent_own_share, 1), "доля предприятий в собственных доходах", "НДФЛ работников, земельный налог, плата за НВОС")}
+          ${tile(pct0(cityRow.transfer_dependence, 1), "зависимость бюджета от трансфертов", `в доходах ${d.base_year} года`)}
+          ${tile(compact(cityRow.base.interbudget_net, " ₽"), "межбюджетное сальдо в год", cityRow.base.interbudget_net < 0 ? "территория - чистый донор субъекта" : "территория получает больше, чем отдаёт")}
+          ${tile(["positive", "inertial", "negative"].map((k) => pct0(cityRow.shares[k], 0)).join(" / "), "доли сценариев", "позитивный / инерционный / негативный, по отчётным годам")}
+          ${["negative", "inertial", "positive"].map((k) => tile(pct(cityRow.horizon[k][H].effect, 1), `эффект к ${H}: ${SC_NAME[k]}`, `класс: ${SC_NAME[cityRow.horizon[k][H].effect_class]}`, k === "positive")).join("")}
+          ${tile(nf(cityRow.resilience, 2), "устойчивость предприятий города", "средняя по весу для города")}
+          ${tile(nf(c.elasticity.budget, 2), "эластичность НДФЛ города к ФОТ", "оценка по ряду ПМО")}
+        </div>
+      </section>
+
+      <section class="card span-8">
+        <h3>${im.name}</h3>
+        <p class="cap">${im.unit === "тыс. руб." ? "Ряд в ценах 2024 года. " : ""}Отчётные годы ${d.years[0]}-${d.base_year} -
+          данные панели (${im.scope === "модель" ? "модельная история по фактической активности" : "источник - в подсказке"}),
+          далее - три сценария и ожидаемая траектория, взвешенная долями сценариев. Пунктир - горизонты ${d.marks.join(" и ")}.
+          Связь с предприятием: <b>${im.relation}</b>; ${im.role}.</p>
+        <div class="chart" id="m-chart"></div>
+      </section>
+
+      <section class="card span-4">
+        <h3>Сценарии к ${H} году</h3>
+        <p class="cap">Значение показателя и изменение к ${d.base_year} году.</p>
+        <table class="tbl" id="m-sum"></table>
+        <div class="scen-notes">${d.scenarios.map((sc) => `<p class="note"><b style="color:${SC_COLOR[sc.key]}">${sc.name}:</b> ${sc.text}</p>`).join("")}</div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Производственный цикл предприятий города</h3>
+        <p class="cap">Индекс активности, ${d.base_year} = 1, взвешенный по ФОТ. Точки - отчётные годы,
+          проекция - тренд с затуханием, продолжение цикла и драйверы консорциума.</p>
+        <div class="chart" id="m-activity"></div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Бюджет города: ${d.base_year} и ${H} год по сценариям</h3>
+        <p class="cap">Доходы местного бюджета по источникам. Вклад предприятий - НДФЛ их работников,
+          земельный налог и плата за НВОС; разрыв с расходами закрывают трансферты субъекта.</p>
+        <div class="chart" id="m-budget"></div>
+      </section>
+
+      <section class="card span-12">
+        <h3>Эффект деятельности предприятий для муниципалитетов к ${H} году</h3>
+        <p class="cap">Отличие города от контрфакта, в котором активность предприятий осталась на уровне
+          ${d.base_year} года: ФОТ, занятость, собственные доходы бюджета, зависимость от трансфертов и выбросы.
+          Точки - негативный, инерционный и позитивный сценарии, ромб - ожидаемый эффект по долям.
+          Нажмите на строку, чтобы открыть город.</p>
+        <div class="chart" id="m-range"></div>
+      </section>
+
+      <section class="card span-12">
+        <div style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap">
+          <h3>Отраслевая сетка ${layerOn ? "с муниципальным слоем" : "без муниципального слоя"}</h3>
+        </div>
+        <p class="cap">${layerOn ? LAYER_CAPTION : "Слой выключен: узлы сетки - как в разделе «Территории». Включите переключатель вверху, чтобы наложить слой."}</p>
+        <div class="chart" id="m-grid"></div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Доли сценариев по отчётным годам</h3>
+        <p class="cap">Годовые приросты активности ${d.years[0]}-${d.base_year}: рост больше
+          ${pct0(d.params.band, 1)} - позитивный, снижение больше ${pct0(d.params.band, 1)} - негативный,
+          остальное - инерционный; сглаживание Лапласа.</p>
+        <div class="chart" id="m-shares"></div>
+      </section>
+
+      <section class="card span-6">
+        <h3>Устойчивость предприятий</h3>
+        <p class="cap">Потеря прибавочного продукта S при 10% изменении драйвера и просадка
+          негативного сценария к 2030 году. R = 1 / (1 + сумма); устойчивое от
+          ${nf(d.params.resilient, 2)}, уязвимое ниже ${nf(d.params.moderate, 2)}.</p>
+        <div class="chart" id="m-risk"></div>
+      </section>
+
+      <section class="card span-7">
+        <h3>Нормативная база консорциума</h3>
+        <p class="cap">Рамка модели, а не юридическое заключение: редакции подлежат проверке на дату расчёта.</p>
+        <div class="scroll"><table class="tbl" id="m-norms"></table></div>
+      </section>
+
+      <section class="card span-5">
+        <h3>Драйверы сценариев</h3>
+        <p class="cap">Годовые изменения, задаваемые решениями регуляторов консорциума.</p>
+        <div class="scroll"><table class="tbl" id="m-drivers"></table></div>
+      </section>
+
+      <section class="card span-12">
+        <h3>Каталог показателей ПМО</h3>
+        <p class="cap">Значений в панели: ${prov}. Реальная выгрузка БД ПМО в
+          <code>syndicat/data/pmo/real.csv</code> замещает синтетику построчно без правки кода.</p>
+        <div class="scroll"><table class="tbl" id="m-catalog"></table></div>
+        <p class="note" style="margin-top:14px">Синтетическая панель построена той же моделью по
+          синтетической истории активности и не является данными Росстата. Названия городов, регионы и статус
+          ЗАТО - фактические; численность, бюджеты и выбросы - демонстрационные.</p>
+      </section>
+    </div>`;
+
+  q(root, "#m-city").addEventListener("change", (e) => actions.set({ city: e.target.value }));
+  q(root, "#m-ind").addEventListener("change", (e) => actions.set({ indicator: e.target.value }));
+  root.querySelectorAll(".chip[data-h]").forEach((b) => b.addEventListener("click", () => actions.set({ horizon: Number(b.dataset.h) })));
+  bindLayerSwitch(root, actions);
+
+  // сценарный график показателя
+  C.scenarioChart(q(root, "#m-chart"), {
+    histYears: d.years, projYears: d.proj_years, baseYear: d.base_year, marks: d.marks,
+    history: ser.history, zero: im.unit === "%" || ind.includes("balance") || ind.includes("net") || ind === "migration",
+    format: fmt, sourceOf: (y) => ser.sources[y] || "—",
+    series: [
+      ...["positive", "inertial", "negative"].map((k) => ({ label: SC_NAME[k], color: SC_COLOR[k], values: ser.scenarios[k] })),
+      { label: "ожидаемая по долям", color: "var(--luch)", values: ser.expected, dash: "6 4", width: 1.6 },
+    ],
+  });
+
+  const base = ser.base ?? ser.history[d.base_year];
+  const sumRows = [{ id: "base", label: `${d.base_year}, база`, v: base, ch: null }]
+    .concat(["positive", "inertial", "negative"].map((k) => ({ id: k, label: SC_NAME[k], v: ser.scenarios[k][H],
+      ch: base ? ser.scenarios[k][H] / base - 1 : null, color: SC_COLOR[k] })))
+    .concat([{ id: "exp", label: "ожидаемая", v: ser.expected[H], ch: base ? ser.expected[H] / base - 1 : null }]);
+  q(root, "#m-sum").innerHTML = `<thead><tr><th>Сценарий</th><th>${H}</th><th>к ${d.base_year}</th></tr></thead><tbody>${
+    sumRows.map((r) => `<tr><td><span style="color:${r.color || "var(--grunt)"}">${r.label}</span></td><td>${fmt(r.v)}</td>
+      <td>${r.ch === null || im.unit === "%" ? "—" : `<span class="${r.ch >= 0 ? "pos" : "neg"}">${pct(r.ch, 1)}</span>`}</td></tr>`).join("")}</tbody>`;
+
+  C.scenarioChart(q(root, "#m-activity"), {
+    histYears: d.years, projYears: d.proj_years, baseYear: d.base_year, marks: d.marks, height: 280,
+    history: c.activity_city, format: (v) => nf(v, 2),
+    series: ["positive", "inertial", "negative"].map((k) => ({ label: SC_NAME[k], color: SC_COLOR[k],
+      values: c.activity_scenarios[k] })),
+  });
+
+  const B = c.budget;
+  const budgetRows = [{ key: "2024", label: `${d.base_year}` },
+    ...["negative", "inertial", "positive"].map((k) => ({ key: `${k}-${H}`, label: `${H} · ${SC_NAME[k]}` }))];
+  C.stackedH(q(root, "#m-budget"), {
+    rows: budgetRows, width: 620, padL: 170, rowH: 34, label: (r) => r.label,
+    keys: [{ key: "ndfl_ent", label: "НДФЛ работников предприятий", color: "var(--ser-2)" },
+      { key: "ndfl_other", label: "НДФЛ остальной экономики", color: "#8E7A4E" },
+      { key: "land", label: "земельный налог предприятий", color: "var(--ser-3)" },
+      { key: "env_fee", label: "плата за НВОС", color: "#7FA391" },
+      { key: "other", label: "прочие собственные доходы", color: "var(--ink-3)" },
+      { key: "transfers", label: "трансферты субъекта", color: "var(--ser-1)" }],
+    value: (r, k) => Math.max(0, B[r.key][k]) * 1e3, format: (v) => compact(v, " ₽"),
+  });
+
+  C.rangeDots(q(root, "#m-range"), {
+    rows: d.cities.map((x) => ({ ...x, focus: x.id === c.id })), padL: 170,
+    label: (r) => r.name + (r.dependence >= 0.2 ? " ●" : ""),
+    keys: ["negative", "inertial", "positive"].map((k) => ({ key: k, label: SC_NAME[k], color: SC_COLOR[k] })),
+    value: (r, k) => r.horizon[k][H].effect * 100, expected: (r) => r.expected_effect[H] * 100,
+    format: (v) => nf(v, 1) + "%",
+    tip: (r) => [["доля в занятости", pct0(r.dependence, 1)], ["класс ожидаемого эффекта", SC_NAME[r.expected_class[H]]]],
+    onPick: (r) => actions.set({ city: r.id }),
+  });
+
+  if (t) drawGrid(q(root, "#m-grid"), t, c.name, actions, layerOn ? d : null);
+
+  const ents = [...d.enterprises].sort((a, b) => b.resilience - a.resilience);
+  C.stackedH(q(root, "#m-shares"), {
+    rows: [...d.enterprises].sort((a, b) => (b.shares.positive - b.shares.negative) - (a.shares.positive - a.shares.negative)),
+    width: 620, padL: 150, rowH: 24, label: (r) => r.short,
+    keys: ["positive", "inertial", "negative"].map((k) => ({ key: k, label: SC_NAME[k], color: SC_COLOR[k] })),
+    value: (r, k) => r.shares[k], format: (v) => pct0(v, 0),
+  });
+  C.stackedH(q(root, "#m-risk"), {
+    rows: ents, width: 620, padL: 150, rowH: 24, label: (r) => `${r.short} · ${nf(r.resilience, 2)}`,
+    keys: [{ key: "market", label: "рынок", color: "var(--ser-1)" },
+      { key: "domestic", label: "внутренний спрос", color: "var(--ser-2)" },
+      { key: "sectoral", label: "отраслевая политика", color: "#7FA391" },
+      { key: "budget", label: "бюджетная политика", color: "var(--ink-3)" },
+      { key: "downside", label: "просадка ×2", color: "#5C0E08" }],
+    value: (r, k) => (k === "downside" ? 2 * Math.max(0, r.downside) : r.risks[k]), format: (v) => nf(v, 2),
+  });
+
+  table(q(root, "#m-norms"), d.consortium.norms.map((n, i) => ({ ...n, id: i })), [
+    { k: "act", t: "Акт", f: (r) => `<span class="name">${r.act}</span>` },
+    { k: "subject", t: "Что регулирует", f: (r) => `<span class="name" style="font-weight:400">${r.subject}</span>` },
+    { k: "parameter", t: "Параметр модели", f: (r) => `<span class="name" style="font-weight:400">${r.parameter}</span>` },
+  ], "id");
+
+  const sc = Object.fromEntries(d.scenarios.map((x) => [x.key, x]));
+  const drv = [
+    ["рынок, %/год × доля экспорта", (x) => pct(x.market, 1) + (x.market_years < 12 ? `, ${x.market_years} г.` : "")],
+    ["внутренний спрос, %/год", (x) => pct(x.domestic, 1)],
+    ["отраслевой заказ, %/год", (x) => pct(x.sectoral, 1)],
+    ["норматив НДФЛ городу с 2026", (x) => (x.ndfl_delta ? `+${nf(x.ndfl_delta * 100, 0)} п.п.` : "без изменений")],
+    ["покрытие разрыва трансфертами", (x) => (x.cover_delta ? `${nf(x.cover_delta * 100, 0)} п.п.` : "без изменений")],
+    ["снижение экоёмкости, %/год", (x) => pct0(x.lean, 1)],
+    ["инвестиции в бережливое, % выпуска", (x) => pct0(x.lean_capex, 1)],
+    ["реальный рост зарплат, %/год", (x) => pct0(x.wage, 1)],
+    ["ввод замещающих мощностей", (x) => (x.capacity === "plan" ? "по плану" : x.capacity === "delay" ? "с задержкой" : "перенос")],
+  ];
+  q(root, "#m-drivers").innerHTML = `<thead><tr><th>Драйвер</th>${["positive", "inertial", "negative"].map((k) =>
+    `<th style="color:${SC_COLOR[k]}">${SC_NAME[k]}</th>`).join("")}</tr></thead><tbody>${drv.map(([label, f]) =>
+    `<tr><td><span class="name" style="font-weight:400;min-width:180px">${label}</span></td>${["positive", "inertial", "negative"].map((k) => `<td>${f(sc[k])}</td>`).join("")}</tr>`).join("")}</tbody>`;
+
+  table(q(root, "#m-catalog"), d.catalog.map((x) => ({ ...x, id: x.key })), [
+    { k: "name", t: "Показатель", f: (r) => `<span class="name">${r.name}<i>${r.key} · ${r.unit}</i></span>` },
+    { k: "section", t: "Раздел", f: (r) => r.section },
+    { k: "scope", t: "Источник", f: (r) => r.scope },
+    { k: "relation", t: "Связь с предприятием", f: (r) => r.relation },
+    { k: "role", t: "Роль в модели", f: (r) => `<span class="name" style="font-weight:400">${r.role}</span>` },
+  ], "section", (r) => r.key === ind);
+  q(root, "#m-catalog").querySelectorAll("tbody tr").forEach((tr) =>
+    tr.addEventListener("click", () => actions.set({ indicator: tr.dataset.id })));
 }
