@@ -5,7 +5,7 @@ import * as V from "./views.js";
 import { nf } from "./format.js";
 
 const state = {
-  view: "overview",
+  view: "about",
   phi: 0.35,
   code: "28",
   ent: "livgidromash",
@@ -24,6 +24,7 @@ const state = {
 };
 
 const VIEWS = {
+  about: { title: "О платформе", sub: "что такое «Синдикат», что он меняет и с чего начать" },
   overview: { title: "Обзор сети", sub: "курс ТЧЧ, отраслевые коэффициенты, контур эмиссии" },
   generation: { title: "Генерация ТЧЧ", sub: "количественные и качественные показатели, сравнение" },
   smoothing: { title: "Сглаживание и база часа", sub: "двойное экспоненциальное сглаживание Хольта" },
@@ -97,6 +98,9 @@ async function render() {
 
   try {
     switch (state.view) {
+      case "about":
+        V.about(node, await api("/api/about", { phi: state.phi }), state, actions);
+        break;
       case "overview":
         V.overview(node, await api("/api/overview", { phi: state.phi }), state, actions);
         break;
