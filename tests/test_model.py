@@ -510,5 +510,20 @@ class TestMunicipalLayer(unittest.TestCase):
         self.assertEqual(len(panel_lines), 1 + sum(len(v) for v in self.panel.values()))
 
 
+class TestAbout(unittest.TestCase):
+    def test_about_shares_follow_phi_and_charter(self):
+        for phi in (0.0, 0.35, 0.6):
+            data, error = api.dispatch("/api/about", f"phi={phi}")
+            self.assertIsNone(error)
+            json.dumps(data, ensure_ascii=False, allow_nan=False)
+            shares = data["shares"]
+            self.assertAlmostEqual(sum(shares.values()), 1.0, places=9)
+            self.assertAlmostEqual(shares["workers"], phi, places=9)
+            self.assertAlmostEqual(shares["territory"], (1 - phi) * data["charter"]["territory"],
+                                   places=9)
+        self.assertEqual(data["group"]["enterprises"], len(rosatom.ENTERPRISES))
+        self.assertEqual(data["group"]["cities"], len(rosatom.CITIES))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

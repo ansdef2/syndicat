@@ -5,12 +5,12 @@ import io
 from urllib.parse import parse_qs
 
 from .model import (analytics, costing, enterprises, indexation, industries, municipal,
-                    pmo, territories)
-from .model.constants import (ALPHA, ALPHA_HALFLIFE, BETA, BETA_HALFLIFE, D0,
-                              DELTA, GAMMA, HOURS_PER_MONTH, INDEX_CAP,
+                    pmo, rosatom, territories)
+from .model.constants import (ACCEPTANCE_CAP, ALPHA, ALPHA_HALFLIFE, BETA, BETA_HALFLIFE, D0,
+                              DELTA, DEVELOPMENT_SHARE, GAMMA, HOURS_PER_MONTH, INDEX_CAP,
                               LAMBDA, MAX_STEP, NATIONAL_WAGE_ANCHOR,
                               PERSONAL_CAP, PHI, PHI_RANGE, QUALITY_FLOOR, RHO,
-                              SOCIAL_RATE, THETA, ZETA)
+                              SOCIAL_RATE, TERRITORY_SHARE, THETA, ZETA)
 
 
 def _f(qs: dict, key: str, default):
@@ -34,6 +34,28 @@ def _phi(qs: dict) -> float:
 
 
 # --- обработчики ------------------------------------------------------------
+
+def about(qs):
+    """Раздел «О платформе»: ключевые величины и раскладка прибавочного продукта при φ."""
+    phi = _phi(qs)
+    ov = analytics.overview(phi)
+    rest = 1.0 - phi
+    return dict(
+        B=ov["B"], phi=phi, labour_part=ov["labour_part"], social_part=ov["social_part"],
+        industries=len(industries.CODES), enterprises=ov["enterprises"],
+        headcount=ov["headcount"],
+        shares=dict(workers=phi, development=rest * DEVELOPMENT_SHARE,
+                    territory=rest * TERRITORY_SHARE, reserve=rest * territories.RESERVE_SHARE),
+        charter=dict(development=DEVELOPMENT_SHARE, territory=TERRITORY_SHARE,
+                     reserve=territories.RESERVE_SHARE, acceptance_cap=ACCEPTANCE_CAP,
+                     max_step=MAX_STEP, theta=THETA),
+        group=dict(name=rosatom.GROUP, enterprises=len(rosatom.ENTERPRISES),
+                   cities=len(rosatom.CITIES),
+                   zato=sum(1 for c in rosatom.CITIES.values() if c["zato"])),
+        municipal=dict(indicators=len(pmo.CATALOG), years=[pmo.YEARS[0], pmo.YEARS[-1]],
+                       horizons=list(municipal.MARKS)),
+    )
+
 
 def overview(qs):
     return analytics.overview(_phi(qs))
@@ -125,6 +147,7 @@ def municipal_view(qs):
 
 
 ROUTES = {
+    "/api/about": about,
     "/api/overview": overview,
     "/api/generation": generation,
     "/api/smoothing": smoothing,
